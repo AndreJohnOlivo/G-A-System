@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Student Sign-In</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="auth-shell">
+      <div class="auth-card">
+        <p class="eyebrow">Student Access</p>
+        <h1>Student Sign-In &amp; Registration</h1>
+        <p class="auth-intro">Use this page to sign in or register as a student. Once you are done, you will be sent back to the main portal.</p>
+
+        <form id="student-login-form" class="auth-form">
+          <label class="auth-field">
+            <span>Username or Email</span>
+            <input id="student-login-username" type="text" placeholder="Enter your username or email" required />
+          </label>
+          <label class="auth-field">
+            <span>Password</span>
+            <input id="student-login-password" type="password" placeholder="Enter your password" required />
+          </label>
+          <button type="submit" class="btn btn-primary auth-submit">Sign In</button>
+          <p id="student-login-message" class="auth-message" role="status"></p>
+        </form>
+
+        <div class="registration-panel">
+          <h3>New student? Register here</h3>
+          <p>Complete your profile so your record can be recognized by the system.</p>
+          <form id="student-registration-form" class="auth-form compact-form">
+            <label class="auth-field">
+              <span>Full Name</span>
+              <input id="student-name" type="text" placeholder="Enter your full name" required />
+            </label>
+            <label class="auth-field">
+              <span>Student ID</span>
+              <input id="student-id" type="text" placeholder="Enter your student ID" required />
+            </label>
+            <label class="auth-field">
+              <span>Email</span>
+              <input id="student-email" type="email" placeholder="Enter your email" required />
+            </label>
+            <label class="auth-field">
+              <span>Create Password</span>
+              <input id="student-password" type="password" placeholder="Create a password" required />
+            </label>
+            <button type="submit" class="btn btn-secondary auth-submit">Register</button>
+            <p id="student-registration-message" class="auth-message"></p>
+          </form>
+        </div>
+
+        <a id="return-to-main" href="index.html" class="auth-link">Return to main portal</a>
+      </div>
+    </div>
+
+    <script>
+      const storageKey = 'uccStudentRecords';
+      const loginForm = document.getElementById('student-login-form');
+      const registrationForm = document.getElementById('student-registration-form');
+      const loginMessage = document.getElementById('student-login-message');
+      const registrationMessage = document.getElementById('student-registration-message');
+
+      function normalizeIdentifier(value) {
+        return value.trim().toLowerCase();
+      }
+
+      async function hashValue(value) {
+        const encoder = new TextEncoder();
+        const data = encoder.encode(value);
+        const digest = await crypto.subtle.digest('SHA-256', data);
+        return Array.from(new Uint8Array(digest))
+          .map((byte) => byte.toString(16).padStart(2, '0'))
+          .join('');
+      }
+
+      async function hashPassword(password, salt) {
+        return hashValue(`${salt}:${password}`);
+      }
+
+      function getPagePath(fileName) {
+        const currentPath = window.location.pathname;
+        const directory = currentPath.includes('/') ? currentPath.substring(0, currentPath.lastIndexOf('/') + 1) : './';
+        return `${directory}${fileName}`;
+      }
+
+      function loadRegisteredStudents() {
+        try {
+          const saved = localStorage.getItem(storageKey);
+          return saved ? JSON.parse(saved) : [];
+        } catch (error) {
+          return [];
+        }
+      }
+
+      function saveRegisteredStudents(students) {
+        localStorage.setItem(storageKey, JSON.stringify(students));
+      }
+
+      const registeredStudents = loadRegisteredStudents();
+
+      function returnToMainPortal(message) {
+        const targetPath = getPagePath('index.html');
+        const url = new URL(targetPath, window.location.href);
+        if (message) {
+          url.searchParams.set('message', message);
+        }
+        window.location.replace(url.toString());
+      }
+
+      document.getElementById('return-to-main').addEventListener('click', (event) => {
+        event.preventDefault();
+        returnToMainPortal('Returned to the main portal.');
+      });
+
+      loginForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+
+        const username = normalizeIdentifier(document.getElementById('student-login-username').value);
+        const password = document.getElementById('student-login-password').value;
+        const identifierHash = await hashValue(username);
+
+        const student = registeredStudents.find((entry) => {
+          return entry.usernameHash === identifierHash || entry.emailHash === identifierHash;
+        });
+
+        if (!student) {
+          loginMessage.textContent = 'If your credentials match our records, you may continue. Please try again or register if you are new.';
+          return;
+        }
+
+        const passwordHash = await hashPassword(password, student.salt);
+        if (student.passwordHash === passwordHash) {
+          loginMessage.textContent = 'Sign-in successful. Returning to the portal...';
+          returnToMainPortal('Student sign-in completed. You have been returned to the main portal.');
+        } else {
+          loginMessage.textContent = 'If your credentials match our records, you may continue. Please try again or register if you are new.';
+        }
+      });
+
+      registrationForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+
+        const fullName = document.getElementById('student-name').value.trim();
+        const studentId = document.getElementById('student-id').value.trim();
+        const email = document.getElementById('student-email').value.trim();
+        const studentPassword = document.getElementById('student-password').value;
+        const usernameValue = email.split('@')[0] || fullName.toLowerCase().replace(/\s+/g, '');
+
+        if (!fullName || !studentId || !email || !studentPassword) {
+          registrationMessage.textContent = 'Please complete every registration field.';
+          return;
+        }
+
+        const salt = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        const usernameHash = await hashValue(normalizeIdentifier(usernameValue));
+        const emailHash = await hashValue(normalizeIdentifier(email));
+        const passwordHash = await hashPassword(studentPassword, salt);
+
+        registeredStudents.push({
+          name: fullName,
+          studentId,
+          username: usernameValue,
+          email,
+          salt,
+          usernameHash,
+          emailHash,
+          passwordHash
+        });
+
+        saveRegisteredStudents(registeredStudents);
+        sessionStorage.setItem('uccAccessRole', 'Student');
+        sessionStorage.setItem('currentStudentName', fullName);
+        registrationMessage.textContent = 'Registration received. Returning to the portal...';
+        returnToMainPortal('Student registration completed. You have been returned to the main portal.');
+      });
+    </script>
+  </body>
+</html>

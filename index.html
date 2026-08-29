@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Grading and Attendance System</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div id="login-screen" class="auth-shell">
+      <div class="auth-card">
+        <p class="eyebrow">Authorized Access Only</p>
+        <h1>UCC Program Head &amp; Staff Portal</h1>
+        <p class="auth-intro">This portal is reserved for Program Heads and UCC Members. Student accounts are not permitted to enter the system.</p>
+
+        <form id="login-form" class="auth-form">
+          <label class="auth-field">
+            <span>Select role</span>
+            <select id="role-select" name="role">
+              <option value="programhead">Program Head</option>
+              <option value="faculty">Faculty</option>
+              <option value="student">Student</option>
+            </select>
+          </label>
+
+          <label class="auth-field">
+            <span>Username or Email</span>
+            <input id="username" name="username" type="text" placeholder="Enter your username" required />
+          </label>
+
+          <label class="auth-field">
+            <span>Password</span>
+            <input id="password" name="password" type="password" placeholder="Enter your password" required />
+          </label>
+
+          <button type="submit" class="btn btn-primary auth-submit">Access Portal</button>
+          <p id="auth-message" class="auth-message" role="status"></p>
+        </form>
+
+        <a href="student.html" class="auth-link">Student sign-in / register here</a>
+      </div>
+    </div>
+
+    <div id="dashboard-shell" class="app-shell hidden">
+      <aside class="sidebar">
+        <div class="brand">
+          <h2>UCC</h2>
+          <p>Academic Portal</p>
+        </div>
+
+        <nav class="nav-links">
+          <a class="nav-item active nav-role-dashboard nav-role-staff" href="index.html">Dashboard</a>
+          <a class="nav-item nav-role-staff" href="attendance.html">Attendance</a>
+          <a class="nav-item nav-role-staff" href="grades.html">Grades</a>
+          <a class="nav-item nav-role-staff" href="students.html">Students</a>
+          <a class="nav-item nav-role-staff" href="reports.html">Reports</a>
+          <a class="nav-item nav-role-student hidden" href="attendance.html">My Attendance</a>
+          <a class="nav-item nav-role-student hidden" href="grades.html">My Grades</a>
+        </nav>
+
+        <div class="sidebar-card">
+          <h3>Security</h3>
+          <p>RBAC and ABAC controls protect academic records and limit access by role and attribute.</p>
+        </div>
+      </aside>
+
+      <main class="dashboard-main">
+        <section id="staff-dashboard-content">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">University Academic Administration</p>
+            <h1>Student Performance Dashboard</h1>
+            <p class="topbar-subtitle">Integrated monitoring for attendance, grading, and academic records.</p>
+          </div>
+          <div class="topbar-actions">
+            <span class="badge">Term 1 • 2026</span>
+            <button id="export-report-btn" type="button" class="btn btn-primary">Export Report</button>
+            <button id="logout-btn" type="button" class="btn btn-secondary">Logout</button>
+          </div>
+        </header>
+
+        <section class="hero-panel">
+          <div>
+            <h2>Daily academic activity overview</h2>
+            <p>
+              The system records attendance, updates grade entries, and provides a live summary
+              for instructors and administrators managing student performance.
+            </p>
+          </div>
+          <div class="hero-metrics">
+            <div class="metric-pill">—</div>
+            <div class="metric-pill">—</div>
+            <div class="metric-pill">—</div>
+          </div>
+        </section>
+
+        <section class="stats-grid">
+          <article class="stat-card">
+            <p class="stat-label">Present Today</p>
+            <h3>—</h3>
+            <span class="stat-trend positive">Waiting for data</span>
+          </article>
+          <article class="stat-card">
+            <p class="stat-label">Late Arrivals</p>
+            <h3>—</h3>
+            <span class="stat-trend">Waiting for data</span>
+          </article>
+          <article class="stat-card">
+            <p class="stat-label">Class Average</p>
+            <h3>—</h3>
+            <span class="stat-trend positive">Waiting for data</span>
+          </article>
+          <article class="stat-card">
+            <p class="stat-label">Pending Grades</p>
+            <h3>—</h3>
+            <span class="stat-trend">Waiting for data</span>
+          </article>
+        </section>
+
+        <section class="content-grid">
+          <article class="card wide-card">
+            <div class="card-header">
+              <h3>Attendance Summary</h3>
+              <span class="badge">This Week</span>
+            </div>
+            <div class="progress-list">
+              <div class="progress-row">
+                <span>Mon</span>
+                <div class="progress-bar"><div style="width: 0%"></div></div>
+                <strong>—</strong>
+              </div>
+              <div class="progress-row">
+                <span>Tue</span>
+                <div class="progress-bar"><div style="width: 0%"></div></div>
+                <strong>—</strong>
+              </div>
+              <div class="progress-row">
+                <span>Wed</span>
+                <div class="progress-bar"><div style="width: 0%"></div></div>
+                <strong>—</strong>
+              </div>
+              <div class="progress-row">
+                <span>Thu</span>
+                <div class="progress-bar"><div style="width: 0%"></div></div>
+                <strong>—</strong>
+              </div>
+            </div>
+          </article>
+
+          <article class="card">
+            <div class="card-header">
+              <h3>Grade Distribution</h3>
+              <span class="badge">Current Term</span>
+            </div>
+            <div class="chart-bars">
+              <div class="bar-group"><span>A</span><div class="bar"><div style="height: 0%"></div></div></div>
+              <div class="bar-group"><span>B</span><div class="bar"><div style="height: 0%"></div></div></div>
+              <div class="bar-group"><span>C</span><div class="bar"><div style="height: 0%"></div></div></div>
+              <div class="bar-group"><span>D</span><div class="bar"><div style="height: 0%"></div></div></div>
+            </div>
+          </article>
+        </section>
+
+        <section class="card">
+          <div class="card-header">
+            <h3>Student Records</h3>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Student</th>
+                <th>Course</th>
+                <th>Attendance</th>
+                <th>Grade</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="student-records-body"></tbody>
+          </table>
+        </section>
+
+        <section class="bottom-grid">
+          <article class="card">
+            <div class="card-header">
+              <h3>Recent Activity</h3>
+              <span class="badge">Today</span>
+            </div>
+            <ul id="activity-list" class="activity-list"></ul>
+          </article>
+        </section>
+        </section>
+
+        <section id="student-dashboard-content" class="hidden">
+          <header class="topbar">
+            <div>
+              <p class="eyebrow">Student Personal Portal</p>
+              <h1>My Attendance &amp; Grades</h1>
+              <p class="topbar-subtitle">Read-only access to your academic records and progress.</p>
+            </div>
+            <div class="topbar-actions">
+              <span class="badge" id="student-role-badge">Student • Read Only</span>
+              <button id="student-logout-btn" type="button" class="btn btn-secondary">Logout</button>
+            </div>
+          </header>
+
+          <section class="hero-panel">
+            <div>
+              <h2 id="student-welcome-name">Welcome, Student</h2>
+              <p>You can review your attendance and grades here. Program Heads can update records for the department.</p>
+            </div>
+            <div class="hero-metrics">
+              <div class="metric-pill">View Only</div>
+              <div class="metric-pill">Attendance</div>
+              <div class="metric-pill">Grades</div>
+            </div>
+          </section>
+
+          <section class="stats-grid">
+            <article class="stat-card">
+              <p class="stat-label">Attendance</p>
+              <h3>—</h3>
+              <span class="stat-trend positive">Waiting for data</span>
+            </article>
+            <article class="stat-card">
+              <p class="stat-label">Current Grade</p>
+              <h3>—</h3>
+              <span class="stat-trend positive">Waiting for data</span>
+            </article>
+            <article class="stat-card">
+              <p class="stat-label">Pending Tasks</p>
+              <h3>—</h3>
+              <span class="stat-trend">Waiting for data</span>
+            </article>
+            <article class="stat-card">
+              <p class="stat-label">Access Level</p>
+              <h3>—</h3>
+              <span class="stat-trend">Waiting for data</span>
+            </article>
+          </section>
+
+          <section class="content-grid">
+            <article class="card wide-card">
+              <div class="card-header">
+                <h3>My Attendance Summary</h3>
+                <span class="badge">Current Term</span>
+              </div>
+              <table class="readonly-table">
+                <thead>
+                  <tr>
+                    <th>Subject</th>
+                    <th>Attendance</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>—</td>
+                    <td>—</td>
+                    <td><span class="status-pill success">—</span></td>
+                  </tr>
+                  <tr>
+                    <td>—</td>
+                    <td>—</td>
+                    <td><span class="status-pill success">—</span></td>
+                  </tr>
+                  <tr>
+                    <td>—</td>
+                    <td>—</td>
+                    <td><span class="status-pill warning">—</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </article>
+
+            <article class="card">
+              <div class="card-header">
+                <h3>My Grades</h3>
+                <span class="badge">Latest</span>
+              </div>
+              <table class="readonly-table">
+                <thead>
+                  <tr>
+                    <th>Subject</th>
+                    <th>Grade</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>—</td>
+                    <td>—</td>
+                  </tr>
+                  <tr>
+                    <td>—</td>
+                    <td>—</td>
+                  </tr>
+                  <tr>
+                    <td>—</td>
+                    <td>—</td>
+                  </tr>
+                </tbody>
+              </table>
+            </article>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script>
+      const loginForm = document.getElementById('login-form');
+      const roleSelect = document.getElementById('role-select');
+      const loginScreen = document.getElementById('login-screen');
+      const dashboardShell = document.getElementById('dashboard-shell');
+      const authMessage = document.getElementById('auth-message');
+      const logoutBtn = document.getElementById('logout-btn');
+      const studentLogoutBtn = document.getElementById('student-logout-btn');
+      const staffDashboardContent = document.getElementById('staff-dashboard-content');
+      const studentDashboardContent = document.getElementById('student-dashboard-content');
+      const exportReportBtn = document.getElementById('export-report-btn');
+      const activityList = document.getElementById('activity-list');
+      const studentWelcomeName = document.getElementById('student-welcome-name');
+      const studentRecordsBody = document.getElementById('student-records-body');
+
+      const rosterData = [];
+
+      const activityFeed = [];
+
+      async function loadStudentRecords() {
+        try {
+          const response = await fetch('/api/students', {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json'
+            }
+          });
+
+          if (!response.ok) {
+            throw new Error('Failed to load students');
+          }
+
+          const payload = await response.json();
+          const rows = payload.data || payload;
+
+          rosterData.length = 0;
+          rosterData.push(...rows);
+          renderStudentRecords();
+        } catch (error) {
+          console.error('Student load error:', error);
+          if (studentRecordsBody) {
+            studentRecordsBody.innerHTML = `
+              <tr>
+                <td colspan="5">Unable to load student records.</td>
+              </tr>
+            `;
+          }
+        }
+      }
+
+      async function loadActivityFeed() {
+        try {
+          const response = await fetch('/api/activity', {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json'
+            }
+          });
+
+          if (!response.ok) {
+            throw new Error('Failed to load activity');
+          }
+
+          const payload = await response.json();
+          const items = payload.data || payload;
+
+          activityFeed.length = 0;
+          activityFeed.push(...items);
+          renderActivityFeed();
+        } catch (error) {
+          console.error('Activity load error:', error);
+          if (activityList) {
+            activityList.innerHTML = '<li>No recent activity available.</li>';
+          }
+        }
+      }
+
+      const authorizedUsers = {
+        programhead: { username: 'programhead', password: 'ProgramHead2026', role: 'Program Head' },
+        faculty: { username: 'faculty', password: 'Faculty2026', role: 'Faculty' }
+      };
+
+      function getPagePath(fileName) {
+        const currentPath = window.location.pathname;
+        const directory = currentPath.includes('/') ? currentPath.substring(0, currentPath.lastIndexOf('/') + 1) : './';
+        return `${directory}${fileName}`;
+      }
+
+      function normalizeIdentifier(value) {
+        return value.trim().toLowerCase();
+      }
+
+      async function hashValue(value) {
+        const encoder = new TextEncoder();
+        const data = encoder.encode(value);
+        const digest = await crypto.subtle.digest('SHA-256', data);
+        return Array.from(new Uint8Array(digest))
+          .map((byte) => byte.toString(16).padStart(2, '0'))
+          .join('');
+      }
+
+      async function hashPassword(password, salt) {
+        return hashValue(`${salt}:${password}`);
+      }
+
+      function loadRegisteredStudents() {
+        try {
+          const saved = localStorage.getItem('uccStudentRecords');
+          return saved ? JSON.parse(saved) : [];
+        } catch (error) {
+          return [];
+        }
+      }
+
+      async function authenticateStudent(username, password) {
+        const students = loadRegisteredStudents();
+        if (!students.length) {
+          return null;
+        }
+
+        const identifierHash = await hashValue(normalizeIdentifier(username));
+        const student = students.find((entry) => entry.usernameHash === identifierHash || entry.emailHash === identifierHash);
+
+        if (!student) {
+          return null;
+        }
+
+        const passwordHash = await hashPassword(password, student.salt);
+        return student.passwordHash === passwordHash ? student : null;
+      }
+
+      function setDashboardView(role) {
+        const normalizedRole = (role || '').toLowerCase();
+        const isStudent = normalizedRole === 'student';
+        const isStaffRole = ['program head', 'faculty', 'staff'].includes(normalizedRole) || ['programhead', 'faculty'].includes(normalizedRole);
+
+        const dashboardNavItems = document.querySelectorAll('.nav-role-dashboard');
+        const staffNavItems = document.querySelectorAll('.nav-role-staff');
+        const studentNavItems = document.querySelectorAll('.nav-role-student');
+
+        dashboardNavItems.forEach((item) => item.classList.toggle('hidden', isStudent));
+        staffNavItems.forEach((item) => item.classList.toggle('hidden', isStudent));
+        studentNavItems.forEach((item) => item.classList.toggle('hidden', !isStudent));
+
+        staffDashboardContent.classList.toggle('hidden', isStudent);
+        studentDashboardContent.classList.toggle('hidden', !isStudent);
+
+        if (exportReportBtn) {
+          exportReportBtn.classList.toggle('hidden', isStudent);
+        }
+
+        if (studentWelcomeName) {
+          const studentName = sessionStorage.getItem('currentStudentName') || 'Student';
+          studentWelcomeName.textContent = `Welcome, ${studentName}`;
+        }
+
+        if (isStaffRole && !isStudent) {
+          dashboardNavItems.forEach((item) => item.classList.remove('hidden'));
+          staffNavItems.forEach((item) => item.classList.remove('hidden'));
+          studentNavItems.forEach((item) => item.classList.add('hidden'));
+        }
+      }
+
+      function renderStudentRecords() {
+        if (!studentRecordsBody) return;
+
+        if (!rosterData.length) {
+          studentRecordsBody.innerHTML = `
+            <tr>
+              <td colspan="5">No student records available yet.</td>
+            </tr>
+          `;
+          return;
+        }
+
+        studentRecordsBody.innerHTML = rosterData.map((student) => {
+          return `
+            <tr>
+              <td>${student.name}</td>
+              <td>${student.course}</td>
+              <td>${student.attendance}</td>
+              <td>${student.grade}</td>
+              <td><span class="status-pill ${student.tone}">${student.status}</span></td>
+            </tr>
+          `;
+        }).join('');
+      }
+
+      function renderActivityFeed() {
+        if (!activityList) return;
+
+        if (!activityFeed.length) {
+          activityList.innerHTML = '<li>No recent activity available.</li>';
+          return;
+        }
+
+        activityList.innerHTML = activityFeed.map((item) => `<li>${item}</li>`).join('');
+      }
+
+      function showDashboard() {
+        loginScreen.classList.add('hidden');
+        dashboardShell.classList.remove('hidden');
+        setDashboardView(sessionStorage.getItem('uccAccessRole') || 'Program Head');
+      }
+
+      function showLogin(message = '') {
+        dashboardShell.classList.add('hidden');
+        loginScreen.classList.remove('hidden');
+        if (message) {
+          authMessage.textContent = message;
+        }
+      }
+
+      function restoreSession() {
+        const savedRole = sessionStorage.getItem('uccAccessRole');
+        const params = new URLSearchParams(window.location.search);
+        const message = params.get('message');
+
+        if (savedRole) {
+          showDashboard();
+          return;
+        }
+
+        showDashboard();
+        if (message) {
+          authMessage.textContent = message;
+        }
+      }
+
+      roleSelect.addEventListener('change', () => {
+        if (roleSelect.value === 'student') {
+          authMessage.textContent = 'Enter your student credentials below, or use the student sign-in page to register.';
+        } else {
+          authMessage.textContent = '';
+        }
+      });
+
+      loginForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+
+        const role = document.getElementById('role-select').value;
+        const username = document.getElementById('username').value.trim();
+        const password = document.getElementById('password').value;
+
+        if (role === 'student') {
+          try {
+            const response = await fetch('/api/login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ role: 'student', username, password })
+            });
+
+            const result = await response.json();
+
+            if (!response.ok || !result.success) {
+              authMessage.textContent = result.message || 'Student login failed.';
+              return;
+            }
+
+            sessionStorage.setItem('uccAccessRole', 'Student');
+            sessionStorage.setItem('currentStudentName', result.student?.name || 'Student');
+            authMessage.textContent = `Welcome, ${result.student?.name || 'Student'}.`;
+            showDashboard();
+            return;
+          } catch (error) {
+            console.error('Student login error:', error);
+            authMessage.textContent = 'Unable to connect to the server.';
+            return;
+          }
+        }
+
+        try {
+          const response = await fetch('/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ role, username, password })
+          });
+
+          const result = await response.json();
+
+          if (!response.ok || !result.success) {
+            sessionStorage.removeItem('uccAccessRole');
+            authMessage.textContent = result.message || 'Invalid credentials. Only authorized Program Heads and Faculty may continue.';
+            return;
+          }
+
+          sessionStorage.setItem('uccAccessRole', result.role || 'Program Head');
+          sessionStorage.removeItem('currentStudentName');
+          authMessage.textContent = `Welcome, ${result.role || 'User'}.`;
+          showDashboard();
+        } catch (error) {
+          console.error('Staff login error:', error);
+          sessionStorage.removeItem('uccAccessRole');
+          authMessage.textContent = 'Unable to connect to the server.';
+        }
+      });
+
+      exportReportBtn.addEventListener('click', () => {
+        const reportBody = `UCC Academic Report\nAttendance: 96.4%\nAverage Grade: 88%\nPending Grades: 7\n`;
+        const blob = new Blob([reportBody], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'ucc-academic-report.txt';
+        link.click();
+        URL.revokeObjectURL(url);
+      });
+
+      logoutBtn.addEventListener('click', () => {
+        sessionStorage.removeItem('uccAccessRole');
+        sessionStorage.removeItem('currentStudentName');
+        showLogin('You have been logged out.');
+      });
+
+      studentLogoutBtn.addEventListener('click', () => {
+        sessionStorage.removeItem('uccAccessRole');
+        sessionStorage.removeItem('currentStudentName');
+        showLogin('You have been logged out.');
+      });
+
+      loadStudentRecords();
+      loadActivityFeed();
+      restoreSession();
+    </script>
+  </body>
+</html>
