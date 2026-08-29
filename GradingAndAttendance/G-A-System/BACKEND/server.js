@@ -3,7 +3,17 @@ const fs = require('fs');
 const path = require('path');
 
 const port = process.env.PORT || 3000;
-const rootDir = __dirname;
+// Serve static files from a configurable folder. Use ROOT_DIR env var if provided,
+// otherwise fall back to the parent project folder (where index.html lives).
+const configuredRoot = process.env.ROOT_DIR && process.env.ROOT_DIR.trim();
+const rootDir = configuredRoot
+  ? path.resolve(configuredRoot)
+  : path.join(__dirname, '..');
+
+// Ensure the root directory exists; if not, log a warning (server will return 404s).
+if (!fs.existsSync(rootDir)) {
+  console.warn('Configured static root does not exist:', rootDir);
+}
 
 const studentRecords = [
   { name: 'Ariana Cruz', course: 'BSCS 2A', attendance: '96%', grade: 'A', status: 'On Track', tone: 'success' },
@@ -171,6 +181,22 @@ const server = http.createServer((req, res) => {
   serveStaticFile(res, url.pathname);
 });
 
-server.listen(port, () => {
-  console.log(`UCC local backend is running at http://localhost:${port}`);
-});
+function startServer(attemptPort) {
+  const p = Number(attemptPort) || Number(process.env.PORT) || 3000;
+
+  server.once('error', (err) => {
+    if (err && err.code === 'EADDRINUSE') {
+      console.warn(`Port ${p} in use, trying ${p + 1}...`);
+      setTimeout(() => startServer(p + 1), 200);
+      return;
+    }
+    console.error('Server error:', err);
+    process.exit(1);
+  });
+
+  server.listen(p, () => {
+    console.log(`UCC local backend is running at http://localhost:${p}`);
+  });
+}
+
+startServer(port);
