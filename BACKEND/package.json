@@ -1,8 +1,11 @@
 {
-  "name": "ucc-grading-attendance-gui",
+  "name": "ucc-gas-backend",
   "version": "1.0.0",
   "private": true,
   "scripts": {
     "start": "node server.js"
+  },
+  "dependencies": {
+    "mongodb": "^5.7.0"
   }
 }
