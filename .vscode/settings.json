@@ -1,0 +1,10 @@
+{
+    "liveServer.settings.port": 5501,
+    "livePreview.defaultPreviewPath": "/CollegeEnrollmenSystem/HTML/bscs4.html",
+    "datadog.ust.environment.setup.focusedName": "production",
+    "datadog.ust.service.setup.linkedNames": [
+        "college-enrollment-system",
+        "python"
+    ],
+    "python-envs.defaultEnvManager": "ms-python.python:system"
+}

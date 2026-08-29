@@ -1,0 +1,37 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../.vscode"
+		},
+		{
+			"path": "../__pycache__"
+		},
+		{
+			"path": "../CollegeEnrollmenSystem"
+		},
+		{
+			"path": "../DBase"
+		},
+		{
+			"path": "../IsangDiwa Page"
+		},
+		{
+			"path": "../java JDK 24"
+		},
+		{
+			"path": "../MainSys"
+		},
+		{
+			"path": "../my-app"
+		},
+		{
+			"path": "../node_modules"
+		},
+		{
+			"path": "../PostgreSQL 17"
+		}
+	]
+}

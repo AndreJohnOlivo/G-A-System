@@ -1,0 +1,138 @@
+/* Importing Montserrat font from Google Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&display=swap');
+
+/* Modern, attractive login styles */
+.login-bg {
+  min-height: 100vh;
+  width: 100vw;
+  background: linear-gradient(135deg, #e0eafc 0%, #cfdef3 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin: 0;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+}
+.login-container {
+  background: #fff;
+  padding: 40px 36px 32px 36px;
+  border-radius: 16px;
+  box-shadow: 0 6px 32px rgba(25, 118, 210, 0.10);
+  width: 100%;
+  max-width: 400px;
+  min-height: 480px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.login-container.shake {
+  animation: shake 0.4s;
+}
+@keyframes shake {
+  10%, 90% { transform: translateX(-2px); }
+  20%, 80% { transform: translateX(4px); }
+  30%, 50%, 70% { transform: translateX(-8px); }
+  40%, 60% { transform: translateX(8px); }
+}
+.login-avatar {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 1.2rem;
+}
+.login-avatar img {
+  width: 70px;
+  height: 70px;
+  border-radius: 50%;
+  border: 2px solid #1976d2;
+  background: #e0eafc;
+  transition: box-shadow 0.3s;
+}
+.login-avatar img:hover {
+  box-shadow: 0 0 0 4px #1976d2, 0 4px 24px rgba(25, 118, 210, 0.15);
+}
+.login-title {
+  text-align: center;
+  margin-bottom: 32px;
+  color: #1976d2;
+  font-weight: 700;
+  font-size: 2.1rem;
+  font-family: 'Montserrat', Arial, sans-serif;
+}
+.login-field {
+  margin-bottom: 22px;
+}
+.login-field label {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: #333;
+  font-weight: 600;
+  font-family: 'Montserrat', Arial, sans-serif;
+}
+.login-field input {
+  width: 100%;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1.5px solid #ccc;
+  font-size: 1.08rem;
+  font-family: 'Montserrat', Arial, sans-serif;
+  transition: border 0.2s, box-shadow 0.2s;
+}
+.login-field input:focus {
+  border: 1.5px solid #1976d2;
+  box-shadow: 0 0 0 2px #90caf9;
+  outline: none;
+}
+.login-password-row {
+  display: flex;
+  align-items: center;
+}
+.login-show-btn {
+  margin-left: 10px;
+  padding: 7px 12px;
+  border: none;
+  background: #eee;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 1.2rem;
+}
+.login-btn {
+  width: 100%;
+  padding: 14px;
+  border-radius: 8px;
+  background: #1976d2;
+  color: #fff;
+  border: none;
+  font-weight: bold;
+  font-size: 1.15rem;
+  cursor: pointer;
+  margin-top: 10px;
+  transition: background 0.2s, transform 0.2s;
+}
+.login-btn:disabled {
+  background: #90caf9;
+  cursor: not-allowed;
+}
+.login-btn:hover:not(:disabled) {
+  background: #1251a3;
+  transform: scale(1.03);
+}
+.login-message {
+  margin-top: 1.5rem;
+  text-align: center;
+  font-weight: bold;
+  font-size: 1.08rem;
+  letter-spacing: 0.2px;
+  font-family: 'Montserrat', Arial, sans-serif;
+  transition: color 0.3s;
+}
+.login-message.success {
+  color: #388e3c;
+}
+.login-message.error {
+  color: #d32f2f;
+}
