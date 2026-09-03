@@ -3,9 +3,22 @@ const fs = require('fs');
 const path = require('path');
 const mongoose = require('mongoose');
 
-mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017')
+mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/ucc_backend_db')
   .then(() => {
     console.log('Connected to MongoDB');
+    try {
+      // Prefer an explicit DB name (allow override via MONGO_DB_NAME). Default to UCC_G&A_DB
+      const targetDbName = process.env.MONGO_DB_NAME || 'UCC_G&A_DB';
+      // Acquire the underlying MongoClient from mongoose and pick the requested DB
+      mongoDb = mongoose.connection.client && mongoose.connection.client.db
+        ? mongoose.connection.client.db(targetDbName)
+        : mongoose.connection.db;
+      useMongo = !!mongoDb;
+      console.log('Using MongoDB database:', mongoDb && mongoDb.databaseName);
+      console.log('Student collection name:', STUDENT_COLLECTION_NAME);
+    } catch (e) {
+      console.warn('Failed to acquire native mongo db from mongoose:', e && e.message);
+    }
   })
   .catch((error) => {
     console.error('Error connecting to MongoDB:', error);
@@ -24,24 +37,20 @@ if (!fs.existsSync(rootDir)) {
   console.warn('Configured static root does not exist:', rootDir);
 }
 
-const studentRecords = [
-  { name: 'Ariana Cruz', course: 'BSCS 2A', attendance: '96%', grade: 'A', status: 'On Track', tone: 'success' },
-  { name: 'Liam Santos', course: 'BSEd 3B', attendance: '92%', grade: 'A-', status: 'Excellent', tone: 'success' },
-  { name: 'Janelle Ramos', course: 'BSBA 1A', attendance: '88%', grade: 'B+', status: 'Stable', tone: 'warning' },
-  { name: 'Marcus Lee', course: 'BSCS 3C', attendance: '81%', grade: 'B', status: 'Monitoring', tone: 'warning' }
-];
+// In-memory fallback store for students is left empty so MongoDB is authoritative
+const studentRecords = [];
 
-const activityFeed = [
-  'Program Head approved the weekly attendance review.',
-  'Faculty submitted updated grade entries for BSCS 2A.',
-  'Student record verification completed for 14 entries.',
-  'Class summary report was exported for the dean.'
-];
+// Minimal in-memory activity feed; prefer fetching from MongoDB
+const activityFeed = [];
 
 const validUsers = {
   programhead: { username: 'programhead', password: 'ProgramHead2026', role: 'Program Head' },
   faculty: { username: 'faculty', password: 'Faculty2026', role: 'Faculty' }
 };
+
+// Configurable collection names
+const TARGET_DB_NAME = process.env.MONGO_DB_NAME || 'UCC_G&A_DB';
+const STUDENT_COLLECTION_NAME = process.env.STUDENTS_COLLECTION || TARGET_DB_NAME;
 
 const mimeTypes = {
   '.html': 'text/html; charset=utf-8',
@@ -61,6 +70,26 @@ let mongoClient = null;
 let mongoDb = null;
 let useMongo = false;
 
+// Simple in-memory session store for demo purposes
+const sessions = {};
+const SESSION_TTL = 1000 * 60 * 60 * 4; // 4 hours
+function generateSessionId() { return require('crypto').randomBytes(24).toString('hex'); }
+function createSession(role, username) {
+  const id = generateSessionId();
+  sessions[id] = { role: role || '', username: username || '', expires: Date.now() + SESSION_TTL };
+  return id;
+}
+function getSessionFromReq(req) {
+  const cookie = req.headers.cookie || '';
+  const match = cookie.match(/(?:^|; )sessionId=([0-9a-fA-F]+)/);
+  if (!match) return null;
+  const id = match[1];
+  const s = sessions[id];
+  if (!s) return null;
+  if (s.expires < Date.now()) { delete sessions[id]; return null; }
+  return s;
+}
+
 async function connectToMongo(uri) {
   try {
     const { MongoClient } = require('mongodb');
@@ -77,13 +106,14 @@ async function connectToMongo(uri) {
   }
 }
 
-function sendJson(res, statusCode, payload) {
-  res.writeHead(statusCode, {
+function sendJson(res, statusCode, payload, additionalHeaders = {}) {
+  const headers = Object.assign({
     'Content-Type': 'application/json; charset=utf-8',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type'
-  });
+  }, additionalHeaders);
+  res.writeHead(statusCode, headers);
   res.end(JSON.stringify(payload));
 }
 
@@ -132,30 +162,79 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type'
+      'Access-Control-Allow-Headers': 'Content-Type, X-Role'
     });
     res.end();
     return;
   }
 
   if (url.pathname === '/api/students') {
-    try {
-      if (useMongo && mongoDb) {
-        const docs = await mongoDb.collection('students').find({}).limit(500).toArray();
-        sendJson(res, 200, { success: true, data: docs });
-        return;
+    // GET: list students. POST: add student record.
+    if (req.method === 'GET') {
+      try {
+        if (useMongo && mongoDb) {
+          const docs = await mongoDb.collection(STUDENT_COLLECTION_NAME).find({}).limit(500).toArray();
+          sendJson(res, 200, { success: true, data: docs });
+          return;
+        }
+      } catch (err) {
+        console.error('Mongo query /api/students failed:', err.message || err);
       }
-    } catch (err) {
-      console.error('Mongo query /api/students failed:', err.message || err);
+
+      sendJson(res, 200, { success: true, data: studentRecords });
+      return;
     }
 
-    sendJson(res, 200, { success: true, data: studentRecords });
+    if (req.method === 'POST') {
+      let body = '';
+      req.on('data', (chunk) => { body += chunk; });
+      req.on('end', async () => {
+        try {
+          // Server-side RBAC: require an authenticated session with Program Head role
+          const sess = getSessionFromReq(req);
+          const roleNormalized = (sess && sess.role ? String(sess.role).toLowerCase() : '');
+          if (!sess || !(roleNormalized === 'program head' || roleNormalized === 'programhead')) {
+            sendJson(res, 403, { success: false, message: 'Forbidden: insufficient role' });
+            return;
+          }
+          const payload = body ? JSON.parse(body) : {};
+          const newStudent = {
+            name: payload.name || payload.fullName || 'Unknown',
+            studentId: payload.studentId || payload.id || '',
+            course: payload.course || '',
+            year: payload.year || '',
+            status: payload.status || 'Active',
+            createdAt: new Date()
+          };
+
+          if (useMongo && mongoDb) {
+            const result = await mongoDb.collection(STUDENT_COLLECTION_NAME).insertOne(newStudent);
+            newStudent._id = result.insertedId;
+            sendJson(res, 201, { success: true, data: newStudent });
+            return;
+          }
+
+          // Fallback to in-memory store
+          studentRecords.push(newStudent);
+          sendJson(res, 201, { success: true, data: newStudent });
+          return;
+        } catch (err) {
+          console.error('Failed to add student:', err);
+          sendJson(res, 500, { success: false, message: 'Failed to add student.' });
+          return;
+        }
+      });
+      return;
+    }
+
+    // Method not allowed
+    sendJson(res, 405, { success: false, message: 'Method not allowed' });
     return;
   }
 
   if (url.pathname === '/api/activity') {
     try {
-      if (useMongo && mongoDb) {
+        if (useMongo && mongoDb) {
         const items = await mongoDb.collection('activity').find({}).limit(200).toArray();
         sendJson(res, 200, { success: true, data: items });
         return;
@@ -170,8 +249,8 @@ const server = http.createServer(async (req, res) => {
 
   if (url.pathname === '/api/records') {
     try {
-      if (useMongo && mongoDb) {
-        const docs = await mongoDb.collection('students').find({}).limit(1000).toArray();
+        if (useMongo && mongoDb) {
+        const docs = await mongoDb.collection(STUDENT_COLLECTION_NAME).find({}).limit(1000).toArray();
         sendJson(res, 200, { success: true, data: docs });
         return;
       }
@@ -204,7 +283,7 @@ const server = http.createServer(async (req, res) => {
             // Try Mongo first
             if (useMongo && mongoDb) {
               try {
-                const student = await mongoDb.collection('students').findOne({ $or: [{ username }, { email: username }] });
+                const student = await mongoDb.collection(STUDENT_COLLECTION_NAME).findOne({ $or: [{ username }, { email: username }] });
                 if (student) {
                   sendJson(res, 200, { success: true, role: 'Student', student });
                   return;
@@ -232,7 +311,10 @@ const server = http.createServer(async (req, res) => {
           if (useMongo && mongoDb) {
             const user = await mongoDb.collection('users').findOne({ username, role });
             if (user && user.password === password) {
-              sendJson(res, 200, { success: true, role: user.role || role, message: `${user.role || role} login successful.` });
+              // create session for staff
+              const sessionId = createSession(user.role || role, username);
+              const cookie = `sessionId=${sessionId}; HttpOnly; Path=/; Max-Age=${Math.floor(SESSION_TTL/1000)}; SameSite=Lax`;
+              sendJson(res, 200, { success: true, role: user.role || role, message: `${user.role || role} login successful.` }, { 'Set-Cookie': cookie });
               return;
             }
           }
@@ -247,11 +329,13 @@ const server = http.createServer(async (req, res) => {
         }
 
         if (username === validUser.username && password === validUser.password) {
+          const sessionId = createSession(validUser.role, username);
+          const cookie = `sessionId=${sessionId}; HttpOnly; Path=/; Max-Age=${Math.floor(SESSION_TTL/1000)}; SameSite=Lax`;
           sendJson(res, 200, {
             success: true,
             role: validUser.role,
             message: `${validUser.role} login successful.`
-          });
+          }, { 'Set-Cookie': cookie });
           return;
         }
 
@@ -260,6 +344,31 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 400, { success: false, message: 'Invalid request body.' });
       }
     });
+    return;
+  }
+
+  // session info endpoint
+  if (url.pathname === '/api/session') {
+    if (req.method === 'GET') {
+      const s = getSessionFromReq(req);
+      sendJson(res, 200, { success: true, session: s ? { username: s.username, role: s.role } : null });
+      return;
+    }
+    sendJson(res, 405, { success: false, message: 'Method not allowed' });
+    return;
+  }
+
+  // logout
+  if (url.pathname === '/api/logout') {
+    if (req.method === 'POST') {
+      const cookie = req.headers.cookie || '';
+      const match = cookie.match(/(?:^|; )sessionId=([0-9a-fA-F]+)/);
+      if (match) { delete sessions[match[1]]; }
+      // clear cookie
+      sendJson(res, 200, { success: true }, { 'Set-Cookie': 'sessionId=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax' });
+      return;
+    }
+    sendJson(res, 405, { success: false, message: 'Method not allowed' });
     return;
   }
 
