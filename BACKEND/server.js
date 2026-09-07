@@ -1,28 +1,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const mongoose = require('mongoose');
-
-mongoose.connect(process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/ucc_backend_db')
-  .then(() => {
-    console.log('Connected to MongoDB');
-    try {
-      // Prefer an explicit DB name (allow override via MONGO_DB_NAME). Default to UCC_G&A_DB
-      const targetDbName = process.env.MONGO_DB_NAME || 'UCC_G&A_DB';
-      // Acquire the underlying MongoClient from mongoose and pick the requested DB
-      mongoDb = mongoose.connection.client && mongoose.connection.client.db
-        ? mongoose.connection.client.db(targetDbName)
-        : mongoose.connection.db;
-      useMongo = !!mongoDb;
-      console.log('Using MongoDB database:', mongoDb && mongoDb.databaseName);
-      console.log('Student collection name:', STUDENT_COLLECTION_NAME);
-    } catch (e) {
-      console.warn('Failed to acquire native mongo db from mongoose:', e && e.message);
-    }
-  })
-  .catch((error) => {
-    console.error('Error connecting to MongoDB:', error);
-  });
+const { MongoClient } = require('mongodb');
 
 const port = process.env.PORT || 3000;
 // Serve static files from a configurable folder. Use ROOT_DIR env var if provided,
@@ -64,8 +43,8 @@ const mimeTypes = {
   '.ico': 'image/x-icon'
 };
 
-// Optional MongoDB integration. If MONGO_URI is provided, the server will
-// attempt to use the `students` and `activity` collections from that DB.
+// A replica set URI lets the driver discover the elected primary and reconnect
+// after a member fails over. Set MONGO_URI to the deployment connection string.
 let mongoClient = null;
 let mongoDb = null;
 let useMongo = false;
@@ -92,12 +71,18 @@ function getSessionFromReq(req) {
 
 async function connectToMongo(uri) {
   try {
-    const { MongoClient } = require('mongodb');
-    mongoClient = new MongoClient(uri, { connectTimeoutMS: 5000 });
+    mongoClient = new MongoClient(uri, {
+      connectTimeoutMS: 5000,
+      serverSelectionTimeoutMS: 5000,
+      retryReads: true,
+      retryWrites: true
+    });
     await mongoClient.connect();
-    mongoDb = mongoClient.db();
+    mongoDb = mongoClient.db(TARGET_DB_NAME);
     useMongo = true;
-    console.log('Connected to MongoDB:', uri.replace(/:\/\/.*@/, '://***@'));
+    console.log('Connected to MongoDB replica set:', uri.replace(/:\/\/.*@/, '://***@'));
+    console.log('Using MongoDB database:', mongoDb.databaseName);
+    console.log('Student collection name:', STUDENT_COLLECTION_NAME);
   } catch (err) {
     console.warn('MongoDB connection failed; falling back to in-memory data.', err.message || err);
     useMongo = false;
@@ -393,4 +378,17 @@ function startServer(attemptPort) {
   });
 }
 
-startServer(port);
+const mongoUri = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/ucc_backend_db';
+
+connectToMongo(mongoUri)
+  .finally(() => startServer(port));
+
+async function shutdown() {
+  if (mongoClient) {
+    await mongoClient.close();
+  }
+  server.close(() => process.exit(0));
+}
+
+process.once('SIGINT', shutdown);
+process.once('SIGTERM', shutdown);
