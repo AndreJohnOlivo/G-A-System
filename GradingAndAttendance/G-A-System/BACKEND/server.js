@@ -1,287 +1,316 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const mongoose = require('mongoose');
-
-mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017')
-  .then(() => {
-    console.log('Connected to MongoDB');
-  })
-  .catch((error) => {
-    console.error('Error connecting to MongoDB:', error);
-  });
+const { MongoClient } = require('mongodb');
+const jwt = require('jsonwebtoken');
+const bcryptjs = require('bcryptjs');
 
 const port = process.env.PORT || 3000;
-// Serve static files from a configurable folder. Use ROOT_DIR env var if provided,
-// otherwise fall back to the parent project folder (where index.html lives).
+const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkey';
+
+// Serve static files from configurable folder
 const configuredRoot = process.env.ROOT_DIR && process.env.ROOT_DIR.trim();
-const rootDir = configuredRoot
-  ? path.resolve(configuredRoot)
-  : path.join(__dirname, '..');
+const rootDir = configuredRoot ? path.resolve(configuredRoot) : path.join(__dirname, '..');
 
-// Ensure the root directory exists; if not, log a warning (server will return 404s).
-if (!fs.existsSync(rootDir)) {
-  console.warn('Configured static root does not exist:', rootDir);
-}
-
-const studentRecords = [
-  { name: 'Ariana Cruz', course: 'BSCS 2A', attendance: '96%', grade: 'A', status: 'On Track', tone: 'success' },
-  { name: 'Liam Santos', course: 'BSEd 3B', attendance: '92%', grade: 'A-', status: 'Excellent', tone: 'success' },
-  { name: 'Janelle Ramos', course: 'BSBA 1A', attendance: '88%', grade: 'B+', status: 'Stable', tone: 'warning' },
-  { name: 'Marcus Lee', course: 'BSCS 3C', attendance: '81%', grade: 'B', status: 'Monitoring', tone: 'warning' }
-];
-
-const activityFeed = [
-  'Program Head approved the weekly attendance review.',
-  'Faculty submitted updated grade entries for BSCS 2A.',
-  'Student record verification completed for 14 entries.',
-  'Class summary report was exported for the dean.'
-];
-
-const validUsers = {
-  programhead: { username: 'programhead', password: 'ProgramHead2026', role: 'Program Head' },
-  faculty: { username: 'faculty', password: 'Faculty2026', role: 'Faculty' }
-};
-
-const mimeTypes = {
-  '.html': 'text/html; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.js': 'application/javascript; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon'
-};
-
-// Optional MongoDB integration. If MONGO_URI is provided, the server will
-// attempt to use the `students` and `activity` collections from that DB.
+// Mongo setup
 let mongoClient = null;
 let mongoDb = null;
 let useMongo = false;
 
+const nimfaSillaAccount = {
+  name: 'Nimfa Silla',
+  username: 'nimfa.silla',
+  role: 'Program Head'
+};
+
+async function seedProgramHeadAccount() {
+  const passwordHash = await bcryptjs.hash('nimfa.silla1', 12);
+  await mongoDb.collection('users').updateOne(
+    { username: nimfaSillaAccount.username },
+    {
+      $set: {
+        name: nimfaSillaAccount.name,
+        role: nimfaSillaAccount.role,
+        password: passwordHash
+      },
+      $setOnInsert: { createdAt: new Date() }
+    },
+    { upsert: true }
+  );
+}
+
+async function copyAndRemove(sourceName, targetName, filter = {}) {
+  const source = mongoDb.collection(sourceName);
+  const documents = await source.find(filter).toArray();
+
+  if (!documents.length) return;
+
+  await mongoDb.collection(targetName).bulkWrite(documents.map((document) => ({
+    replaceOne: { filter: { _id: document._id }, replacement: document, upsert: true }
+  })));
+  await source.deleteMany({ _id: { $in: documents.map((document) => document._id) } });
+}
+
+async function migrateStudentCollections() {
+  await copyAndRemove('students', 'student_logins', { password: { $exists: true } });
+  await copyAndRemove('studentRecords', 'students');
+}
+
 async function connectToMongo(uri) {
   try {
-    const { MongoClient } = require('mongodb');
-    mongoClient = new MongoClient(uri, { connectTimeoutMS: 5000 });
+    mongoClient = new MongoClient(uri);
     await mongoClient.connect();
-    mongoDb = mongoClient.db();
+    mongoDb = mongoClient.db(process.env.MONGO_DB_NAME || 'UCC_G&A_DB');
+    await seedProgramHeadAccount();
+    await migrateStudentCollections();
     useMongo = true;
-    console.log('Connected to MongoDB:', uri.replace(/:\/\/.*@/, '://***@'));
+    console.log('Connected to MongoDB and prepared user accounts and student records');
   } catch (err) {
-    console.warn('MongoDB connection failed; falling back to in-memory data.', err.message || err);
+    console.warn('MongoDB connection failed, fallback to memory:', err.message);
     useMongo = false;
-    mongoClient = null;
-    mongoDb = null;
   }
 }
 
+// JWT helpers
+function generateToken(user) {
+  return jwt.sign(
+    { username: user.username, role: user.role },
+    JWT_SECRET,
+    { expiresIn: '4h' }
+  );
+}
+
+function authenticateToken(req) {
+  const authHeader = req.headers['authorization'];
+  const bearerToken = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  const cookieToken = (req.headers.cookie || '')
+    .split(';')
+    .map((cookie) => cookie.trim())
+    .find((cookie) => cookie.startsWith('ucc_session='));
+  const token = bearerToken || (cookieToken && decodeURIComponent(cookieToken.slice('ucc_session='.length)));
+  if (!token) return null;
+  try {
+    return jwt.verify(token, JWT_SECRET);
+  } catch {
+    return null;
+  }
+}
+
+function requireRole(user, role) {
+  return user && user.role.toLowerCase() === role.toLowerCase();
+}
+
+// Utility: send JSON
 function sendJson(res, statusCode, payload) {
+  res.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.end(JSON.stringify(payload));
+}
+
+function sendAuthenticatedJson(res, statusCode, payload, token) {
   res.writeHead(statusCode, {
     'Content-Type': 'application/json; charset=utf-8',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type'
+    'Set-Cookie': `ucc_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=14400`
   });
   res.end(JSON.stringify(payload));
 }
 
+// Static file serving
 function getStaticFile(filePath) {
   const safePath = path.normalize(filePath).replace(/^\.(?:\/|\\)/, '');
   const fullPath = path.join(rootDir, safePath);
-
-  if (!fullPath.startsWith(rootDir)) {
-    return null;
-  }
-
   return fs.existsSync(fullPath) && fs.statSync(fullPath).isFile() ? fullPath : null;
 }
 
+const contentTypes = {
+  '.css': 'text/css; charset=utf-8',
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.ico': 'image/x-icon'
+};
+
 function serveStaticFile(res, requestPath) {
   const normalizedPath = requestPath === '/' ? '/index.html' : requestPath;
-  const relativePath = normalizedPath.replace(/^\//, '');
-  const filePath = getStaticFile(relativePath);
-
+  const filePath = getStaticFile(normalizedPath.replace(/^\//, ''));
   if (!filePath) {
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('Not found');
     return;
   }
-
   const extension = path.extname(filePath).toLowerCase();
-  fs.readFile(filePath, (error, content) => {
-    if (error) {
+  fs.readFile(filePath, (err, content) => {
+    if (err) {
       res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
       res.end('Server error');
       return;
     }
-
-    res.writeHead(200, {
-      'Content-Type': mimeTypes[extension] || 'application/octet-stream',
-      'Access-Control-Allow-Origin': '*'
-    });
+    res.writeHead(200, { 'Content-Type': contentTypes[extension] || 'application/octet-stream' });
     res.end(content);
   });
 }
 
+const protectedPages = {
+  '/attendance.html': ['Program Head', 'Faculty'],
+  '/grades.html': ['Program Head', 'Faculty'],
+  '/reports.html': ['Program Head', 'Faculty'],
+  '/students.html': ['Program Head']
+};
+
+// Server
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
-  if (req.method === 'OPTIONS') {
-    res.writeHead(204, {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type'
-    });
-    res.end();
-    return;
-  }
-
-  if (url.pathname === '/api/students') {
-    try {
-      if (useMongo && mongoDb) {
-        const docs = await mongoDb.collection('students').find({}).limit(500).toArray();
-        sendJson(res, 200, { success: true, data: docs });
-        return;
-      }
-    } catch (err) {
-      console.error('Mongo query /api/students failed:', err.message || err);
-    }
-
-    sendJson(res, 200, { success: true, data: studentRecords });
-    return;
-  }
-
-  if (url.pathname === '/api/activity') {
-    try {
-      if (useMongo && mongoDb) {
-        const items = await mongoDb.collection('activity').find({}).limit(200).toArray();
-        sendJson(res, 200, { success: true, data: items });
-        return;
-      }
-    } catch (err) {
-      console.error('Mongo query /api/activity failed:', err.message || err);
-    }
-
-    sendJson(res, 200, { success: true, data: activityFeed });
-    return;
-  }
-
-  if (url.pathname === '/api/records') {
-    try {
-      if (useMongo && mongoDb) {
-        const docs = await mongoDb.collection('students').find({}).limit(1000).toArray();
-        sendJson(res, 200, { success: true, data: docs });
-        return;
-      }
-    } catch (err) {
-      console.error('Mongo query /api/records failed:', err.message || err);
-    }
-
-    sendJson(res, 200, { success: true, data: studentRecords });
-    return;
-  }
-
-  if (url.pathname === '/api/login') {
-    if (req.method !== 'POST') {
-      sendJson(res, 405, { success: false, message: 'Method not allowed' });
-      return;
-    }
-
+  // Login endpoint
+  if (url.pathname === '/api/login' && req.method === 'POST') {
     let rawBody = '';
-    req.on('data', (chunk) => {
-      rawBody += chunk;
-    });
-
+    req.on('data', chunk => rawBody += chunk);
     req.on('end', async () => {
       try {
-        const payload = rawBody ? JSON.parse(rawBody) : {};
-        const { role, username, password } = payload;
+        const { role, username, password } = JSON.parse(rawBody);
 
         if (role === 'student') {
-          if (typeof username === 'string' && username.trim() && typeof password === 'string' && password.trim()) {
-            // Try Mongo first
-            if (useMongo && mongoDb) {
-              try {
-                const student = await mongoDb.collection('students').findOne({ $or: [{ username }, { email: username }] });
-                if (student) {
-                  sendJson(res, 200, { success: true, role: 'Student', student });
-                  return;
-                }
-              } catch (err) {
-                console.error('Mongo lookup student login failed:', err.message || err);
-              }
-            }
-
-            // Fallback: accept any non-empty student credentials (keeps behavior consistent with earlier simple server)
-            sendJson(res, 200, {
-              success: true,
-              role: 'Student',
-              student: { name: username.trim(), username: username.trim() }
-            });
-            return;
-          }
-
-          sendJson(res, 401, { success: false, message: 'Student credentials are required.' });
-          return;
-        }
-
-        // Staff login: try Mongo users collection, then fallback to configured validUsers
-        try {
           if (useMongo && mongoDb) {
-            const user = await mongoDb.collection('users').findOne({ username, role });
-            if (user && user.password === password) {
-              sendJson(res, 200, { success: true, role: user.role || role, message: `${user.role || role} login successful.` });
-              return;
+            const identifier = String(username || '').trim().toLowerCase();
+            const student = await mongoDb.collection('student_logins').findOne({ $or: [{ username: identifier }, { email: identifier }] });
+            if (student && student.password && await bcryptjs.compare(password, student.password)) {
+              const token = generateToken({ username: student.username, role: 'Student' });
+              return sendAuthenticatedJson(res, 200, { success: true, role: 'Student', token, student: { name: student.name } }, token);
             }
           }
-        } catch (err) {
-          console.error('Mongo lookup staff login failed:', err.message || err);
+          return sendJson(res, 401, { success: false, message: 'Invalid student credentials' });
         }
 
-        const validUser = validUsers[role];
-        if (!validUser) {
-          sendJson(res, 401, { success: false, message: 'Role not authorized.' });
-          return;
+        // Staff login
+        if (useMongo && mongoDb) {
+          const staffUsername = String(username || '').trim().toLowerCase();
+          const staffRole = role === 'programhead' ? 'Program Head' : role;
+          const user = await mongoDb.collection('users').findOne({ username: staffUsername, role: staffRole });
+          if (user && await bcryptjs.compare(password, user.password)) {
+            const token = generateToken({ username, role: user.role });
+            return sendAuthenticatedJson(res, 200, { success: true, role: user.role, token }, token);
+          }
         }
-
-        if (username === validUser.username && password === validUser.password) {
-          sendJson(res, 200, {
-            success: true,
-            role: validUser.role,
-            message: `${validUser.role} login successful.`
-          });
-          return;
-        }
-
-        sendJson(res, 401, { success: false, message: 'Invalid username or password.' });
-      } catch (error) {
-        sendJson(res, 400, { success: false, message: 'Invalid request body.' });
+        return sendJson(res, 401, { success: false, message: 'Invalid staff credentials' });
+      } catch {
+        sendJson(res, 400, { success: false, message: 'Invalid request body' });
       }
     });
     return;
   }
 
+  if (url.pathname === '/api/student-registration' && req.method === 'POST') {
+    let rawBody = '';
+    req.on('data', chunk => rawBody += chunk);
+    req.on('end', async () => {
+      try {
+        const { name, studentId, email, password } = JSON.parse(rawBody);
+        const normalizedEmail = String(email || '').trim().toLowerCase();
+        const normalizedUsername = normalizedEmail.split('@')[0];
+
+        if (!name || !studentId || !normalizedEmail || !password || !normalizedUsername) {
+          return sendJson(res, 400, { success: false, message: 'All registration fields are required.' });
+        }
+        if (!useMongo || !mongoDb) {
+          return sendJson(res, 503, { success: false, message: 'Student registration is temporarily unavailable.' });
+        }
+
+        const existingStudent = await mongoDb.collection('student_logins').findOne({
+          $or: [{ username: normalizedUsername }, { email: normalizedEmail }, { studentId: String(studentId).trim() }]
+        });
+        if (existingStudent) {
+          return sendJson(res, 409, { success: false, message: 'A student account with those details already exists.' });
+        }
+
+        const student = {
+          name: String(name).trim(),
+          studentId: String(studentId).trim(),
+          username: normalizedUsername,
+          email: normalizedEmail,
+          password: await bcryptjs.hash(password, 12),
+          createdAt: new Date()
+        };
+        await mongoDb.collection('student_logins').insertOne(student);
+        return sendJson(res, 201, { success: true, message: 'Registration successful. Please sign in.' });
+      } catch {
+        return sendJson(res, 400, { success: false, message: 'Invalid registration request.' });
+      }
+    });
+    return;
+  }
+
+  // Students API
+  if (url.pathname === '/api/students') {
+    const user = authenticateToken(req);
+    if (!user) return sendJson(res, 401, { success: false, message: 'Unauthorized' });
+
+    if (req.method === 'GET') {
+      if (!requireRole(user, 'Program Head') && !requireRole(user, 'Faculty')) {
+        return sendJson(res, 403, { success: false, message: 'Forbidden' });
+      }
+      const docs = useMongo ? await mongoDb.collection('students').find({}).limit(500).toArray() : [];
+      return sendJson(res, 200, { success: true, data: docs });
+    }
+
+    if (req.method === 'POST') {
+      if (!requireRole(user, 'Program Head')) return sendJson(res, 403, { success: false, message: 'Forbidden' });
+      let body = '';
+      req.on('data', chunk => body += chunk);
+      req.on('end', async () => {
+        const payload = JSON.parse(body);
+        const newStudent = { ...payload, createdAt: new Date() };
+        const result = await mongoDb.collection('students').insertOne(newStudent);
+        sendJson(res, 201, { success: true, data: { ...newStudent, _id: result.insertedId } });
+      });
+      return;
+    }
+  }
+
+  // Activity API
+  if (url.pathname === '/api/activity') {
+    const user = authenticateToken(req);
+    if (!user) return sendJson(res, 401, { success: false, message: 'Unauthorized' });
+    if (!requireRole(user, 'Program Head') && !requireRole(user, 'Faculty')) {
+      return sendJson(res, 403, { success: false, message: 'Forbidden' });
+    }
+    const items = useMongo ? await mongoDb.collection('activity').find({}).limit(200).toArray() : [];
+    return sendJson(res, 200, { success: true, data: items });
+  }
+
+  // Session info
+  if (url.pathname === '/api/session') {
+    const user = authenticateToken(req);
+    return sendJson(res, 200, { success: true, session: user || null });
+  }
+
+  if (url.pathname === '/api/logout' && req.method === 'POST') {
+    res.writeHead(204, {
+      'Set-Cookie': 'ucc_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0'
+    });
+    return res.end();
+  }
+
+  if (protectedPages[url.pathname]) {
+    const user = authenticateToken(req);
+    if (!user) {
+      res.writeHead(302, { Location: '/' });
+      return res.end();
+    }
+    if (!protectedPages[url.pathname].some((role) => requireRole(user, role))) {
+      return sendJson(res, 403, { success: false, message: 'Forbidden' });
+    }
+  }
+
+  // Default: serve static
   serveStaticFile(res, url.pathname);
 });
 
-function startServer(attemptPort) {
-  const p = Number(attemptPort) || Number(process.env.PORT) || 3000;
-
-  server.once('error', (err) => {
-    if (err && err.code === 'EADDRINUSE') {
-      console.warn(`Port ${p} in use, trying ${p + 1}...`);
-      setTimeout(() => startServer(p + 1), 200);
-      return;
-    }
-    console.error('Server error:', err);
-    process.exit(1);
-  });
-
-  server.listen(p, () => {
-    console.log(`UCC local backend is running at http://localhost:${p}`);
-  });
-}
-
-startServer(port);
+// Start server
+const mongoUri = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/ucc_backend_db';
+connectToMongo(mongoUri).finally(() => {
+  server.listen(port, () => console.log(`Server running at http://localhost:${port}`));
+});

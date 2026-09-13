@@ -26,7 +26,7 @@
           <p id="student-login-message" class="auth-message" role="status"></p>
         </form>
 
-        <div class="registration-panel">
+        <div id="registration-panel" class="registration-panel">
           <h3>New student? Register here</h3>
           <p>Complete your profile so your record can be recognized by the system.</p>
           <form id="student-registration-form" class="auth-form compact-form">
@@ -59,6 +59,7 @@
       const storageKey = 'uccStudentRecords';
       const loginForm = document.getElementById('student-login-form');
       const registrationForm = document.getElementById('student-registration-form');
+      const registrationPanel = document.getElementById('registration-panel');
       const loginMessage = document.getElementById('student-login-message');
       const registrationMessage = document.getElementById('student-registration-message');
 
@@ -119,23 +120,26 @@
 
         const username = normalizeIdentifier(document.getElementById('student-login-username').value);
         const password = document.getElementById('student-login-password').value;
-        const identifierHash = await hashValue(username);
 
-        const student = registeredStudents.find((entry) => {
-          return entry.usernameHash === identifierHash || entry.emailHash === identifierHash;
-        });
+        try {
+          const response = await fetch('/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ role: 'student', username, password })
+          });
+          const result = await response.json();
+          if (!response.ok || !result.success) {
+            loginMessage.textContent = result.message || 'Invalid student credentials.';
+            return;
+          }
 
-        if (!student) {
-          loginMessage.textContent = 'If your credentials match our records, you may continue. Please try again or register if you are new.';
-          return;
-        }
-
-        const passwordHash = await hashPassword(password, student.salt);
-        if (student.passwordHash === passwordHash) {
-          loginMessage.textContent = 'Sign-in successful. Returning to the portal...';
-          returnToMainPortal('Student sign-in completed. You have been returned to the main portal.');
-        } else {
-          loginMessage.textContent = 'If your credentials match our records, you may continue. Please try again or register if you are new.';
+          sessionStorage.setItem('uccAccessRole', result.role);
+          sessionStorage.setItem('uccAccessToken', result.token);
+          sessionStorage.setItem('currentStudentName', result.student?.name || 'Student');
+          returnToMainPortal('Student sign-in completed.');
+        } catch (error) {
+          console.error('Student login error:', error);
+          loginMessage.textContent = 'Unable to connect to the server.';
         }
       });
 
@@ -146,34 +150,33 @@
         const studentId = document.getElementById('student-id').value.trim();
         const email = document.getElementById('student-email').value.trim();
         const studentPassword = document.getElementById('student-password').value;
-        const usernameValue = email.split('@')[0] || fullName.toLowerCase().replace(/\s+/g, '');
 
         if (!fullName || !studentId || !email || !studentPassword) {
           registrationMessage.textContent = 'Please complete every registration field.';
           return;
         }
 
-        const salt = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-        const usernameHash = await hashValue(normalizeIdentifier(usernameValue));
-        const emailHash = await hashValue(normalizeIdentifier(email));
-        const passwordHash = await hashPassword(studentPassword, salt);
+        try {
+          const response = await fetch('/api/student-registration', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: fullName, studentId, email, password: studentPassword })
+          });
+          const result = await response.json();
+          if (!response.ok || !result.success) {
+            registrationMessage.textContent = result.message || 'Registration could not be completed.';
+            return;
+          }
 
-        registeredStudents.push({
-          name: fullName,
-          studentId,
-          username: usernameValue,
-          email,
-          salt,
-          usernameHash,
-          emailHash,
-          passwordHash
-        });
-
-        saveRegisteredStudents(registeredStudents);
-        sessionStorage.setItem('uccAccessRole', 'Student');
-        sessionStorage.setItem('currentStudentName', fullName);
-        registrationMessage.textContent = 'Registration received. Returning to the portal...';
-        returnToMainPortal('Student registration completed. You have been returned to the main portal.');
+          registrationForm.reset();
+          registrationPanel.classList.add('hidden');
+          loginMessage.textContent = 'Registration successful. Sign in with your email and password.';
+          registrationMessage.textContent = '';
+          document.getElementById('student-login-username').focus();
+        } catch (error) {
+          console.error('Student registration error:', error);
+          registrationMessage.textContent = 'Unable to connect to the server.';
+        }
       });
     </script>
   </body>

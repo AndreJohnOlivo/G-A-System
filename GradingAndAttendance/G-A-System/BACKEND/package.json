@@ -6,6 +6,8 @@
     "start": "node server.js"
   },
   "dependencies": {
+    "bcryptjs": "^5.1.0",
+    "jsonwebtoken": "^9.0.0",
     "mongodb": "^5.7.0"
   }
 }
