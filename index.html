@@ -492,9 +492,9 @@
             <tr>
               <td>${student.name}</td>
               <td>${student.course}</td>
-              <td>${student.attendance}</td>
-              <td>${student.grade}</td>
-              <td><span class="status-pill ${student.tone}">${student.status}</span></td>
+              <td>${student.attendance || 'Not recorded'}</td>
+              <td>${student.grade || 'Not recorded'}</td>
+              <td><span class="status-pill ${student.tone || 'success'}">${student.status || 'Not set'}</span></td>
             </tr>
           `;
         }).join('');
@@ -521,6 +521,14 @@
           loadActivityFeed();
         }
       }
+
+      setInterval(() => {
+        const role = sessionStorage.getItem('uccAccessRole');
+        if (role && role.toLowerCase() !== 'student') {
+          loadStudentRecords();
+          loadActivityFeed();
+        }
+      }, 5000);
 
       function showLogin(message = '') {
         dashboardShell.classList.add('hidden');
