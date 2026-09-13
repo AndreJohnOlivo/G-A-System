@@ -101,7 +101,75 @@
             </ul>
           </article>
         </section>
+
+        <section class="card">
+          <div class="card-header">
+            <h3>Student Record Summary</h3>
+            <span class="badge">Current List</span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Student</th>
+                <th>ID</th>
+                <th>Course</th>
+                <th>Year</th>
+                <th>Attendance</th>
+                <th>Average Grade</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="report-records-body">
+              <tr><td colspan="7">Loading student records...</td></tr>
+            </tbody>
+          </table>
+        </section>
       </main>
     </div>
+    <script>
+      const reportRecordsBody = document.getElementById('report-records-body');
+
+      function getAuthHeaders() {
+        const token = sessionStorage.getItem('uccAccessToken');
+        return token ? { Authorization: `Bearer ${token}` } : {};
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, (character) => ({
+          '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        })[character]);
+      }
+
+      async function loadReportRecords() {
+        try {
+          const response = await fetch('/api/students', { headers: getAuthHeaders() });
+          const result = await response.json();
+          const students = result.data || [];
+
+          if (!response.ok || !result.success) throw new Error('Unable to load students');
+          if (!students.length) {
+            reportRecordsBody.innerHTML = '<tr><td colspan="7">No student records available yet.</td></tr>';
+            return;
+          }
+
+          reportRecordsBody.innerHTML = students.map((student) => `
+            <tr>
+              <td>${escapeHtml(student.name || 'Not set')}</td>
+              <td>${escapeHtml(student.studentId || 'Not set')}</td>
+              <td>${escapeHtml(student.course || 'Not set')}</td>
+              <td>${escapeHtml(student.year || 'Not set')}</td>
+              <td>${escapeHtml(student.attendance || 'Not recorded')}</td>
+              <td>${escapeHtml(student.grade || 'Not recorded')}</td>
+              <td><span class="status-pill success">${escapeHtml(student.status || 'Not set')}</span></td>
+            </tr>
+          `).join('');
+        } catch (error) {
+          reportRecordsBody.innerHTML = '<tr><td colspan="7">Unable to load student records.</td></tr>';
+        }
+      }
+
+      loadReportRecords();
+      setInterval(loadReportRecords, 5000);
+    </script>
   </body>
 </html>

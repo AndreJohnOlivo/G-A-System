@@ -1,7 +1,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { MongoClient } = require('mongodb');
+const { MongoClient, ObjectId } = require('mongodb');
 const jwt = require('jsonwebtoken');
 const bcryptjs = require('bcryptjs');
 
@@ -238,6 +238,64 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 201, { success: true, message: 'Registration successful. Please sign in.' });
       } catch {
         return sendJson(res, 400, { success: false, message: 'Invalid registration request.' });
+      }
+    });
+    return;
+  }
+
+  const studentUpdateMatch = url.pathname.match(/^\/api\/students\/([a-f\d]{24})$/i);
+  if (studentUpdateMatch && req.method === 'PATCH') {
+    const user = authenticateToken(req);
+    if (!requireRole(user, 'Program Head')) return sendJson(res, 403, { success: false, message: 'Forbidden' });
+
+    let body = '';
+    req.on('data', (chunk) => body += chunk);
+    req.on('end', async () => {
+      try {
+        const payload = JSON.parse(body);
+        const updates = {};
+        const studentCollection = mongoDb.collection('students');
+        const existingStudent = await studentCollection.findOne({ _id: new ObjectId(studentUpdateMatch[1]) });
+        if (!existingStudent) return sendJson(res, 404, { success: false, message: 'Student record not found.' });
+
+        if (Object.hasOwn(payload, 'attendance')) {
+          const attendanceOptions = ['Present', 'Absent', 'Late', 'Not recorded'];
+          if (!attendanceOptions.includes(payload.attendance)) {
+            return sendJson(res, 400, { success: false, message: 'Invalid attendance value.' });
+          }
+          updates.attendance = payload.attendance;
+        }
+
+        if (Object.hasOwn(payload, 'midterm') || Object.hasOwn(payload, 'final')) {
+          for (const field of ['midterm', 'final']) {
+            if (!Object.hasOwn(payload, field) || payload[field] === '') continue;
+            const score = Number(payload[field]);
+            if (!Number.isFinite(score) || score < 0 || score > 100) {
+              return sendJson(res, 400, { success: false, message: 'Grades must be between 0 and 100.' });
+            }
+            updates[field] = score;
+          }
+
+          const midterm = updates.midterm ?? existingStudent.midterm;
+          const final = updates.final ?? existingStudent.final;
+          if (Number.isFinite(midterm) && Number.isFinite(final)) {
+            updates.grade = ((midterm + final) / 2).toFixed(2);
+          }
+        }
+
+        if (!Object.keys(updates).length) {
+          return sendJson(res, 400, { success: false, message: 'No record updates were provided.' });
+        }
+
+        updates.updatedAt = new Date();
+        const result = await studentCollection.findOneAndUpdate(
+          { _id: new ObjectId(studentUpdateMatch[1]) },
+          { $set: updates },
+          { returnDocument: 'after' }
+        );
+        return sendJson(res, 200, { success: true, data: result.value });
+      } catch {
+        return sendJson(res, 400, { success: false, message: 'Invalid student update request.' });
       }
     });
     return;
