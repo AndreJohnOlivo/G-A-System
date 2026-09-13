@@ -11,7 +11,7 @@
       <div class="auth-card">
         <p class="eyebrow">Authorized Access Only</p>
         <h1>UCC Program Head &amp; Staff Portal</h1>
-        <p class="auth-intro">This portal is reserved for Program Heads and UCC Members. Student accounts are not permitted to enter the system.</p>
+        <p class="auth-intro">This portal is reserved for Program Heads and UCC Members & Students only.</p>
 
         <form id="login-form" class="auth-form">
           <label class="auth-field">
@@ -54,8 +54,8 @@
           <a class="nav-item nav-role-staff" href="grades.html">Grades</a>
           <a class="nav-item nav-role-staff" href="students.html">Students</a>
           <a class="nav-item nav-role-staff" href="reports.html">Reports</a>
-          <a class="nav-item nav-role-student hidden" href="attendance.html">My Attendance</a>
-          <a class="nav-item nav-role-student hidden" href="grades.html">My Grades</a>
+          <a class="nav-item nav-role-student hidden" href="#student-attendance">My Attendance</a>
+          <a class="nav-item nav-role-student hidden" href="#student-grades">My Grades</a>
         </nav>
 
         <div class="sidebar-card">
@@ -239,7 +239,7 @@
           </section>
 
           <section class="content-grid">
-            <article class="card wide-card">
+            <article id="student-attendance" class="card wide-card">
               <div class="card-header">
                 <h3>My Attendance Summary</h3>
                 <span class="badge">Current Term</span>
@@ -272,7 +272,7 @@
               </table>
             </article>
 
-            <article class="card">
+            <article id="student-grades" class="card">
               <div class="card-header">
                 <h3>My Grades</h3>
                 <span class="badge">Latest</span>
@@ -324,12 +324,18 @@
 
       const activityFeed = [];
 
+      function getAuthHeaders() {
+        const token = sessionStorage.getItem('uccAccessToken');
+        return token ? { Authorization: `Bearer ${token}` } : {};
+      }
+
       async function loadStudentRecords() {
         try {
           const response = await fetch('/api/students', {
             method: 'GET',
             headers: {
-              'Content-Type': 'application/json'
+              'Content-Type': 'application/json',
+              ...getAuthHeaders()
             }
           });
 
@@ -360,7 +366,8 @@
           const response = await fetch('/api/activity', {
             method: 'GET',
             headers: {
-              'Content-Type': 'application/json'
+              'Content-Type': 'application/json',
+              ...getAuthHeaders()
             }
           });
 
@@ -507,7 +514,12 @@
       function showDashboard() {
         loginScreen.classList.add('hidden');
         dashboardShell.classList.remove('hidden');
-        setDashboardView(sessionStorage.getItem('uccAccessRole') || 'Program Head');
+        const role = sessionStorage.getItem('uccAccessRole');
+        setDashboardView(role);
+        if (role && role.toLowerCase() !== 'student') {
+          loadStudentRecords();
+          loadActivityFeed();
+        }
       }
 
       function showLogin(message = '') {
@@ -518,20 +530,31 @@
         }
       }
 
-      function restoreSession() {
-        const savedRole = sessionStorage.getItem('uccAccessRole');
+      async function restoreSession() {
         const params = new URLSearchParams(window.location.search);
         const message = params.get('message');
+        const token = sessionStorage.getItem('uccAccessToken');
 
-        if (savedRole) {
-          showDashboard();
+        if (!token) {
+          showLogin(message);
           return;
         }
 
-        showDashboard();
-        if (message) {
-          authMessage.textContent = message;
+        try {
+          const response = await fetch('/api/session', { headers: getAuthHeaders() });
+          const result = await response.json();
+          if (response.ok && result.session) {
+            sessionStorage.setItem('uccAccessRole', result.session.role);
+            showDashboard();
+            return;
+          }
+        } catch (error) {
+          console.error('Session validation error:', error);
         }
+
+        sessionStorage.removeItem('uccAccessToken');
+        sessionStorage.removeItem('uccAccessRole');
+        showLogin(message || 'Please sign in to continue.');
       }
 
       roleSelect.addEventListener('change', () => {
@@ -565,6 +588,7 @@
             }
 
             sessionStorage.setItem('uccAccessRole', 'Student');
+            sessionStorage.setItem('uccAccessToken', result.token);
             sessionStorage.setItem('currentStudentName', result.student?.name || 'Student');
             authMessage.textContent = `Welcome, ${result.student?.name || 'Student'}.`;
             showDashboard();
@@ -592,12 +616,14 @@
           }
 
           sessionStorage.setItem('uccAccessRole', result.role || 'Program Head');
+          sessionStorage.setItem('uccAccessToken', result.token);
           sessionStorage.removeItem('currentStudentName');
           authMessage.textContent = `Welcome, ${result.role || 'User'}.`;
           showDashboard();
         } catch (error) {
           console.error('Staff login error:', error);
           sessionStorage.removeItem('uccAccessRole');
+            sessionStorage.removeItem('uccAccessToken');
           authMessage.textContent = 'Unable to connect to the server.';
         }
       });
@@ -613,20 +639,26 @@
         URL.revokeObjectURL(url);
       });
 
-      logoutBtn.addEventListener('click', () => {
+      async function logout() {
+        try {
+          await fetch('/api/logout', { method: 'POST' });
+        } catch (error) {
+          console.error('Logout error:', error);
+        }
         sessionStorage.removeItem('uccAccessRole');
+        sessionStorage.removeItem('uccAccessToken');
         sessionStorage.removeItem('currentStudentName');
         showLogin('You have been logged out.');
+      }
+
+      logoutBtn.addEventListener('click', () => {
+        logout();
       });
 
       studentLogoutBtn.addEventListener('click', () => {
-        sessionStorage.removeItem('uccAccessRole');
-        sessionStorage.removeItem('currentStudentName');
-        showLogin('You have been logged out.');
+        logout();
       });
 
-      loadStudentRecords();
-      loadActivityFeed();
       restoreSession();
     </script>
   </body>
