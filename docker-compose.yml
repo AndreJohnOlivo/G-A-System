@@ -1,0 +1,66 @@
+services:
+  mongo-primary:
+    image: mongo:7
+    command: ["mongod", "--replSet", "ucc-rs", "--bind_ip_all"]
+    volumes:
+      - mongo-primary-data:/data/db
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --eval \"db.adminCommand('ping').ok\" localhost:27017/test"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  mongo-secondary-1:
+    image: mongo:7
+    command: ["mongod", "--replSet", "ucc-rs", "--bind_ip_all"]
+    volumes:
+      - mongo-secondary-1-data:/data/db
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --eval \"db.adminCommand('ping').ok\" localhost:27017/test"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  mongo-secondary-2:
+    image: mongo:7
+    command: ["mongod", "--replSet", "ucc-rs", "--bind_ip_all"]
+    volumes:
+      - mongo-secondary-2-data:/data/db
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --eval \"db.adminCommand('ping').ok\" localhost:27017/test"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  replica-set-init:
+    image: mongo:7
+    depends_on:
+      mongo-primary:
+        condition: service_healthy
+      mongo-secondary-1:
+        condition: service_healthy
+      mongo-secondary-2:
+        condition: service_healthy
+    volumes:
+      - ./BACKEND/init-replica-set.js:/scripts/init-replica-set.js:ro
+    entrypoint: ["mongosh", "--host", "mongo-primary:27017", "/scripts/init-replica-set.js"]
+
+  backend:
+    build:
+      context: .
+      dockerfile: BACKEND/Dockerfile
+    depends_on:
+      replica-set-init:
+        condition: service_completed_successfully
+    environment:
+      PORT: 3000
+      MONGO_DB_NAME: UCC_G&A_DB
+      MONGO_URI: mongodb://mongo-primary:27017,mongo-secondary-1:27017,mongo-secondary-2:27017/UCC_G%26A_DB?replicaSet=ucc-rs
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+volumes:
+  mongo-primary-data:
+  mongo-secondary-1-data:
+  mongo-secondary-2-data:
