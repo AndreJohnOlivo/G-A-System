@@ -17,13 +17,54 @@ let mongoClient = null;
 let mongoDb = null;
 let useMongo = false;
 
+const nimfaSillaAccount = {
+  name: 'Nimfa Silla',
+  username: 'nimfa.silla',
+  role: 'Program Head'
+};
+
+async function seedProgramHeadAccount() {
+  const passwordHash = await bcryptjs.hash('nimfa.silla1', 12);
+  await mongoDb.collection('users').updateOne(
+    { username: nimfaSillaAccount.username },
+    {
+      $set: {
+        name: nimfaSillaAccount.name,
+        role: nimfaSillaAccount.role,
+        password: passwordHash
+      },
+      $setOnInsert: { createdAt: new Date() }
+    },
+    { upsert: true }
+  );
+}
+
+async function copyAndRemove(sourceName, targetName, filter = {}) {
+  const source = mongoDb.collection(sourceName);
+  const documents = await source.find(filter).toArray();
+
+  if (!documents.length) return;
+
+  await mongoDb.collection(targetName).bulkWrite(documents.map((document) => ({
+    replaceOne: { filter: { _id: document._id }, replacement: document, upsert: true }
+  })));
+  await source.deleteMany({ _id: { $in: documents.map((document) => document._id) } });
+}
+
+async function migrateStudentCollections() {
+  await copyAndRemove('students', 'student_logins', { password: { $exists: true } });
+  await copyAndRemove('studentRecords', 'students');
+}
+
 async function connectToMongo(uri) {
   try {
     mongoClient = new MongoClient(uri);
     await mongoClient.connect();
     mongoDb = mongoClient.db(process.env.MONGO_DB_NAME || 'UCC_G&A_DB');
+    await seedProgramHeadAccount();
+    await migrateStudentCollections();
     useMongo = true;
-    console.log('Connected to MongoDB');
+    console.log('Connected to MongoDB and prepared user accounts and student records');
   } catch (err) {
     console.warn('MongoDB connection failed, fallback to memory:', err.message);
     useMongo = false;
@@ -135,7 +176,7 @@ const server = http.createServer(async (req, res) => {
         if (role === 'student') {
           if (useMongo && mongoDb) {
             const identifier = String(username || '').trim().toLowerCase();
-            const student = await mongoDb.collection('students').findOne({ $or: [{ username: identifier }, { email: identifier }] });
+            const student = await mongoDb.collection('student_logins').findOne({ $or: [{ username: identifier }, { email: identifier }] });
             if (student && student.password && await bcryptjs.compare(password, student.password)) {
               const token = generateToken({ username: student.username, role: 'Student' });
               return sendAuthenticatedJson(res, 200, { success: true, role: 'Student', token, student: { name: student.name } }, token);
@@ -146,7 +187,9 @@ const server = http.createServer(async (req, res) => {
 
         // Staff login
         if (useMongo && mongoDb) {
-          const user = await mongoDb.collection('users').findOne({ username, role });
+          const staffUsername = String(username || '').trim().toLowerCase();
+          const staffRole = role === 'programhead' ? 'Program Head' : role;
+          const user = await mongoDb.collection('users').findOne({ username: staffUsername, role: staffRole });
           if (user && await bcryptjs.compare(password, user.password)) {
             const token = generateToken({ username, role: user.role });
             return sendAuthenticatedJson(res, 200, { success: true, role: user.role, token }, token);
@@ -176,7 +219,7 @@ const server = http.createServer(async (req, res) => {
           return sendJson(res, 503, { success: false, message: 'Student registration is temporarily unavailable.' });
         }
 
-        const existingStudent = await mongoDb.collection('students').findOne({
+        const existingStudent = await mongoDb.collection('student_logins').findOne({
           $or: [{ username: normalizedUsername }, { email: normalizedEmail }, { studentId: String(studentId).trim() }]
         });
         if (existingStudent) {
@@ -191,7 +234,7 @@ const server = http.createServer(async (req, res) => {
           password: await bcryptjs.hash(password, 12),
           createdAt: new Date()
         };
-        await mongoDb.collection('students').insertOne(student);
+        await mongoDb.collection('student_logins').insertOne(student);
         return sendJson(res, 201, { success: true, message: 'Registration successful. Please sign in.' });
       } catch {
         return sendJson(res, 400, { success: false, message: 'Invalid registration request.' });
