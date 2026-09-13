@@ -22,10 +22,6 @@
                 <a class="nav-item" href="reports.html">Reports</a>
             </nav>
 
-            <div class="sidebar-card">
-                <h3>Security</h3>
-                <p>RBAC and ABAC controls protect academic records and limit access by role and attribute.</p>
-            </div>
         </aside>
 
         <main class="dashboard-main">
@@ -46,13 +42,18 @@
                     <h3>Student Attendance</h3>
                     <span class="badge">Current List</span>
                 </div>
+                <div class="topbar-actions">
+                    <label>Subject <input id="attendance-subject" type="text" placeholder="e.g. CS 101"></label>
+                    <label>Date <input id="attendance-date" type="date"></label>
+                    <button id="attendance-filter" class="btn btn-secondary" type="button">Load Date</button>
+                </div>
                 <table>
                     <thead>
                         <tr>
                             <th>Student</th>
                             <th>ID</th>
-                            <th>Course</th>
-                            <th>Year</th>
+                            <th>Subject</th>
+                            <th>Date</th>
                             <th>Attendance</th>
                             <th>Status</th>
                             <th>Action</th>
@@ -79,15 +80,24 @@
                 })[character]);
             }
 
+            const attendanceSubject = document.getElementById('attendance-subject');
+            const attendanceDate = document.getElementById('attendance-date');
+            attendanceDate.value = new Date().toISOString().slice(0, 10);
+
             async function loadAttendanceRecords() {
                 try {
                     const sessionResponse = await fetch('/api/session', { headers: getAuthHeaders() });
                     const session = await sessionResponse.json();
                     canManageAttendance = session.session?.role === 'Program Head';
 
-                    const response = await fetch('/api/students', { headers: getAuthHeaders() });
-                    const result = await response.json();
+                    const [studentsResponse, attendanceResponse] = await Promise.all([
+                        fetch('/api/students', { headers: getAuthHeaders() }),
+                        fetch(`/api/attendance?date=${encodeURIComponent(attendanceDate.value)}&subject=${encodeURIComponent(attendanceSubject.value.trim())}`, { headers: getAuthHeaders() })
+                    ]);
+                    const result = await studentsResponse.json();
+                    const attendanceResult = await attendanceResponse.json();
                     const students = result.data || [];
+                    const records = attendanceResult.data || [];
 
                     if (!response.ok || !result.success) throw new Error('Unable to load students');
                     if (!students.length) {
@@ -99,11 +109,11 @@
                         <tr>
                             <td>${escapeHtml(student.name || 'Not set')}</td>
                             <td>${escapeHtml(student.studentId || 'Not set')}</td>
-                            <td>${escapeHtml(student.course || 'Not set')}</td>
-                            <td>${escapeHtml(student.year || 'Not set')}</td>
+                            <td>${escapeHtml(attendanceSubject.value.trim() || 'Set subject above')}</td>
+                            <td>${escapeHtml(attendanceDate.value)}</td>
                             <td>
                                 <select class="attendance-select" ${canManageAttendance ? '' : 'disabled'}>
-                                    ${['Present', 'Absent', 'Late', 'Not recorded'].map((status) => `<option ${student.attendance === status ? 'selected' : ''}>${status}</option>`).join('')}
+                                    ${['Present', 'Absent', 'Late'].map((status) => `<option ${(records.find((record) => record.studentId === student.studentId)?.status || 'Present') === status ? 'selected' : ''}>${status}</option>`).join('')}
                                 </select>
                             </td>
                             <td><span class="status-pill success">${escapeHtml(student.status || 'Not set')}</span></td>
@@ -120,13 +130,15 @@
                 if (!button) return;
 
                 const row = button.closest('tr');
-                const attendance = row.querySelector('.attendance-select').value;
+                const status = row.querySelector('.attendance-select').value;
+                const subject = attendanceSubject.value.trim();
+                if (!subject) return alert('Enter a subject before saving attendance.');
                 button.disabled = true;
                 try {
-                    const response = await fetch(`/api/students/${button.dataset.studentId}`, {
-                        method: 'PATCH',
+                    const response = await fetch('/api/attendance', {
+                        method: 'POST',
                         headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-                        body: JSON.stringify({ attendance })
+                        body: JSON.stringify({ studentId: row.children[1].textContent, subject, date: attendanceDate.value, status })
                     });
                     const result = await response.json();
                     if (!response.ok || !result.success) throw new Error(result.message || 'Unable to save attendance');
@@ -136,6 +148,8 @@
                     button.disabled = false;
                 }
             });
+
+            document.getElementById('attendance-filter').addEventListener('click', loadAttendanceRecords);
 
             loadAttendanceRecords();
             setInterval(() => {

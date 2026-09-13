@@ -22,10 +22,6 @@
           <a class="nav-item" href="reports.html">Reports</a>
         </nav>
 
-        <div class="sidebar-card">
-          <h3>Security</h3>
-          <p>RBAC and ABAC controls protect academic records and limit access by role and attribute.</p>
-        </div>
       </aside>
 
       <main class="dashboard-main">
@@ -69,6 +65,11 @@
             <h3>Grade Records</h3>
             <span class="badge">Current Term</span>
           </div>
+          <div class="topbar-actions">
+            <label>Subject <input id="grade-subject" type="text" placeholder="e.g. CS 101"></label>
+            <label>Term <input id="grade-term" type="text" value="Term 1 2026"></label>
+            <button id="grade-filter" class="btn btn-secondary" type="button">Load Records</button>
+          </div>
           <table>
             <thead>
               <tr>
@@ -103,15 +104,23 @@
         })[character]);
       }
 
+      const gradeSubject = document.getElementById('grade-subject');
+      const gradeTerm = document.getElementById('grade-term');
+
       async function loadGradeRecords() {
         try {
           const sessionResponse = await fetch('/api/session', { headers: getAuthHeaders() });
           const session = await sessionResponse.json();
           canManageGrades = session.session?.role === 'Program Head';
 
-          const response = await fetch('/api/students', { headers: getAuthHeaders() });
-          const result = await response.json();
+          const [studentsResponse, gradesResponse] = await Promise.all([
+            fetch('/api/students', { headers: getAuthHeaders() }),
+            fetch(`/api/grades?subject=${encodeURIComponent(gradeSubject.value.trim())}&term=${encodeURIComponent(gradeTerm.value.trim())}`, { headers: getAuthHeaders() })
+          ]);
+          const result = await studentsResponse.json();
+          const gradesResult = await gradesResponse.json();
           const students = result.data || [];
+          const records = gradesResult.data || [];
 
           if (!response.ok || !result.success) throw new Error('Unable to load students');
           if (!students.length) {
@@ -119,17 +128,20 @@
             return;
           }
 
-          gradeRecordsBody.innerHTML = students.map((student) => `
+          gradeRecordsBody.innerHTML = students.map((student) => {
+            const record = records.find((item) => item.studentId === student.studentId) || {};
+            return `
             <tr>
               <td>${escapeHtml(student.name || 'Not set')}</td>
               <td>${escapeHtml(student.course || 'Not set')}</td>
-              <td><input class="midterm-input" type="number" min="0" max="100" step="0.01" value="${escapeHtml(student.midterm ?? '')}" ${canManageGrades ? '' : 'disabled'}></td>
-              <td><input class="final-input" type="number" min="0" max="100" step="0.01" value="${escapeHtml(student.final ?? '')}" ${canManageGrades ? '' : 'disabled'}></td>
-              <td>${escapeHtml(student.grade || 'Not recorded')}</td>
+              <td><input class="midterm-input" type="number" min="0" max="100" step="0.01" value="${escapeHtml(record.midterm ?? '')}" ${canManageGrades ? '' : 'disabled'}></td>
+              <td><input class="final-input" type="number" min="0" max="100" step="0.01" value="${escapeHtml(record.final ?? '')}" ${canManageGrades ? '' : 'disabled'}></td>
+              <td>${escapeHtml(record.average ?? 'Not recorded')}</td>
               <td><span class="status-pill success">${escapeHtml(student.status || 'Not set')}</span></td>
-              ${canManageGrades ? `<td><button type="button" class="btn btn-primary save-grade-btn" data-student-id="${student._id}">Save</button></td>` : '<td>Read only</td>'}
+              ${canManageGrades ? `<td><button type="button" class="btn btn-primary save-grade-btn" data-student-id="${escapeHtml(student.studentId)}">Save</button></td>` : '<td>Read only</td>'}
             </tr>
-          `).join('');
+          `;
+          }).join('');
         } catch (error) {
           gradeRecordsBody.innerHTML = '<tr><td colspan="6">Unable to load student records.</td></tr>';
         }
@@ -145,17 +157,15 @@
         const updates = {};
         if (midterm !== '') updates.midterm = midterm;
         if (final !== '') updates.final = final;
-        if (!Object.keys(updates).length) {
-          alert('Enter at least one grade before saving.');
-          return;
-        }
+        const subject = gradeSubject.value.trim();
+        if (!subject) return alert('Enter a subject before saving grades.');
 
         button.disabled = true;
         try {
-          const response = await fetch(`/api/students/${button.dataset.studentId}`, {
-            method: 'PATCH',
+          const response = await fetch('/api/grades', {
+            method: 'POST',
             headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-            body: JSON.stringify(updates)
+            body: JSON.stringify({ studentId: button.dataset.studentId, subject, term: gradeTerm.value.trim(), ...updates })
           });
           const result = await response.json();
           if (!response.ok || !result.success) throw new Error(result.message || 'Unable to save grades');
@@ -165,6 +175,8 @@
           button.disabled = false;
         }
       });
+
+      document.getElementById('grade-filter').addEventListener('click', loadGradeRecords);
 
       loadGradeRecords();
       setInterval(() => {

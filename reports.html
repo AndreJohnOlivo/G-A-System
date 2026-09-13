@@ -22,10 +22,6 @@
           <a class="nav-item active" href="reports.html">Reports</a>
         </nav>
 
-        <div class="sidebar-card">
-          <h3>Security</h3>
-          <p>RBAC and ABAC controls protect academic records and limit access by role and attribute.</p>
-        </div>
       </aside>
 
       <main class="dashboard-main">
@@ -37,29 +33,29 @@
           </div>
           <div class="topbar-actions">
             <span class="badge">Term 1 • 2026</span>
-            <button type="button" class="btn btn-primary">Generate Report</button>
+            <button id="export-report-btn" type="button" class="btn btn-primary">Export CSV</button>
           </div>
         </header>
 
         <section class="stats-grid">
           <article class="stat-card">
             <p class="stat-label">Attendance Rate</p>
-            <h3>—</h3>
+            <h3 id="attendance-rate">—</h3>
             <span class="stat-trend positive">Pending data</span>
           </article>
           <article class="stat-card">
             <p class="stat-label">Class Average</p>
-            <h3>—</h3>
+            <h3 id="class-average">—</h3>
             <span class="stat-trend positive">Pending data</span>
           </article>
           <article class="stat-card">
             <p class="stat-label">Students at Risk</p>
-            <h3>—</h3>
+            <h3 id="at-risk">—</h3>
             <span class="stat-trend">Pending review</span>
           </article>
           <article class="stat-card">
             <p class="stat-label">Pending Tasks</p>
-            <h3>—</h3>
+            <h3 id="pending-grades">—</h3>
             <span class="stat-trend positive">Pending data</span>
           </article>
         </section>
@@ -128,6 +124,7 @@
     </div>
     <script>
       const reportRecordsBody = document.getElementById('report-records-body');
+      const reportData = [];
 
       function getAuthHeaders() {
         const token = sessionStorage.getItem('uccAccessToken');
@@ -142,8 +139,16 @@
 
       async function loadReportRecords() {
         try {
-          const response = await fetch('/api/students', { headers: getAuthHeaders() });
+          const [response, attendanceResponse, gradesResponse, summaryResponse] = await Promise.all([
+            fetch('/api/students', { headers: getAuthHeaders() }),
+            fetch('/api/attendance', { headers: getAuthHeaders() }),
+            fetch('/api/grades', { headers: getAuthHeaders() }),
+            fetch('/api/summary', { headers: getAuthHeaders() })
+          ]);
           const result = await response.json();
+          const attendance = (await attendanceResponse.json()).data || [];
+          const grades = (await gradesResponse.json()).data || [];
+          const summary = (await summaryResponse.json()).data || {};
           const students = result.data || [];
 
           if (!response.ok || !result.success) throw new Error('Unable to load students');
@@ -152,14 +157,26 @@
             return;
           }
 
-          reportRecordsBody.innerHTML = students.map((student) => `
+          document.getElementById('attendance-rate').textContent = summary.attendanceRate === null ? '—' : `${summary.attendanceRate}%`;
+          document.getElementById('class-average').textContent = summary.classAverage ?? '—';
+          document.getElementById('at-risk').textContent = summary.atRisk ?? '—';
+          document.getElementById('pending-grades').textContent = summary.pendingGrades ?? '—';
+          reportData.length = 0;
+          reportData.push(...students.map((student) => {
+            const attendanceEntries = attendance.filter((record) => record.studentId === student.studentId);
+            const gradeEntries = grades.filter((record) => record.studentId === student.studentId && Number.isFinite(record.average));
+            const attendanceRate = attendanceEntries.length ? `${Math.round((attendanceEntries.filter((record) => record.status === 'Present').length / attendanceEntries.length) * 100)}%` : 'Not recorded';
+            const average = gradeEntries.length ? (gradeEntries.reduce((total, record) => total + record.average, 0) / gradeEntries.length).toFixed(2) : 'Not recorded';
+            return { student, attendanceRate, average };
+          }));
+          reportRecordsBody.innerHTML = reportData.map(({ student, attendanceRate, average }) => `
             <tr>
               <td>${escapeHtml(student.name || 'Not set')}</td>
               <td>${escapeHtml(student.studentId || 'Not set')}</td>
               <td>${escapeHtml(student.course || 'Not set')}</td>
               <td>${escapeHtml(student.year || 'Not set')}</td>
-              <td>${escapeHtml(student.attendance || 'Not recorded')}</td>
-              <td>${escapeHtml(student.grade || 'Not recorded')}</td>
+              <td>${escapeHtml(attendanceRate)}</td>
+              <td>${escapeHtml(average)}</td>
               <td><span class="status-pill success">${escapeHtml(student.status || 'Not set')}</span></td>
             </tr>
           `).join('');
@@ -167,6 +184,15 @@
           reportRecordsBody.innerHTML = '<tr><td colspan="7">Unable to load student records.</td></tr>';
         }
       }
+
+      document.getElementById('export-report-btn').addEventListener('click', () => {
+        const quote = (value) => `"${String(value ?? '').replaceAll('"', '""')}"`;
+        const rows = [['Student', 'Student ID', 'Course', 'Year', 'Attendance Rate', 'Average Grade', 'Status'], ...reportData.map(({ student, attendanceRate, average }) => [student.name, student.studentId, student.course, student.year, attendanceRate, average, student.status])];
+        const blob = new Blob([rows.map((row) => row.map(quote).join(',')).join('\n')], { type: 'text/csv;charset=utf-8' });
+        const link = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: 'ucc-academic-report.csv' });
+        link.click();
+        URL.revokeObjectURL(link.href);
+      });
 
       loadReportRecords();
       setInterval(loadReportRecords, 5000);

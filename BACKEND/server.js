@@ -6,7 +6,8 @@ const jwt = require('jsonwebtoken');
 const bcryptjs = require('bcryptjs');
 
 const port = process.env.PORT || 3000;
-const JWT_SECRET = process.env.JWT_SECRET || 'supersecretkey';
+const JWT_SECRET = process.env.JWT_SECRET || 'development-secret-change-me';
+const PROGRAM_HEAD_PASSWORD = process.env.PROGRAM_HEAD_PASSWORD || 'nimfa.silla1';
 
 // Serve static files from configurable folder
 const configuredRoot = process.env.ROOT_DIR && process.env.ROOT_DIR.trim();
@@ -24,7 +25,7 @@ const nimfaSillaAccount = {
 };
 
 async function seedProgramHeadAccount() {
-  const passwordHash = await bcryptjs.hash('nimfa.silla1', 12);
+  const passwordHash = await bcryptjs.hash(PROGRAM_HEAD_PASSWORD, 12);
   await mongoDb.collection('users').updateOne(
     { username: nimfaSillaAccount.username },
     {
@@ -61,6 +62,11 @@ async function connectToMongo(uri) {
     mongoClient = new MongoClient(uri);
     await mongoClient.connect();
     mongoDb = mongoClient.db(process.env.MONGO_DB_NAME || 'UCC_G&A_DB');
+    await Promise.all([
+      mongoDb.collection('students').createIndex({ studentId: 1 }, { unique: true, sparse: true }),
+      mongoDb.collection('attendance_logs').createIndex({ studentId: 1, subject: 1, date: 1 }, { unique: true }),
+      mongoDb.collection('grade_records').createIndex({ studentId: 1, subject: 1, term: 1 }, { unique: true })
+    ]);
     await seedProgramHeadAccount();
     await migrateStudentCollections();
     useMongo = true;
@@ -98,6 +104,39 @@ function authenticateToken(req) {
 
 function requireRole(user, role) {
   return user && user.role.toLowerCase() === role.toLowerCase();
+}
+
+function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', (chunk) => body += chunk);
+    req.on('end', () => {
+      try {
+        resolve(JSON.parse(body || '{}'));
+      } catch {
+        reject(new Error('Invalid JSON'));
+      }
+    });
+  });
+}
+
+function requireProgramHead(req, res) {
+  const user = authenticateToken(req);
+  if (!requireRole(user, 'Program Head')) {
+    sendJson(res, 403, { success: false, message: 'Program Head access is required.' });
+    return null;
+  }
+  return user;
+}
+
+function asText(value) {
+  return String(value || '').trim();
+}
+
+async function getStudentByIdentifier(identifier) {
+  return mongoDb.collection('students').findOne({
+    $or: [{ _id: ObjectId.isValid(identifier) ? new ObjectId(identifier) : null }, { studentId: identifier }]
+  });
 }
 
 // Utility: send JSON
@@ -204,46 +243,144 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (url.pathname === '/api/student-registration' && req.method === 'POST') {
-    let rawBody = '';
-    req.on('data', chunk => rawBody += chunk);
-    req.on('end', async () => {
+    return sendJson(res, 403, { success: false, message: 'Student accounts are provisioned by the registrar.' });
+  }
+
+  if (url.pathname === '/api/attendance') {
+    const user = authenticateToken(req);
+    if (!user || (!requireRole(user, 'Program Head') && !requireRole(user, 'Faculty'))) {
+      return sendJson(res, 403, { success: false, message: 'Staff access is required.' });
+    }
+    if (req.method === 'GET') {
+      const filter = {};
+      if (url.searchParams.get('date')) filter.date = url.searchParams.get('date');
+      if (url.searchParams.get('subject')) filter.subject = url.searchParams.get('subject');
+      const data = useMongo ? await mongoDb.collection('attendance_logs').find(filter).sort({ date: -1 }).toArray() : [];
+      return sendJson(res, 200, { success: true, data });
+    }
+    if (req.method === 'POST') {
+      if (!requireRole(user, 'Program Head')) return sendJson(res, 403, { success: false, message: 'Program Head access is required.' });
       try {
-        const { name, studentId, email, password } = JSON.parse(rawBody);
-        const normalizedEmail = String(email || '').trim().toLowerCase();
-        const normalizedUsername = normalizedEmail.split('@')[0];
-
-        if (!name || !studentId || !normalizedEmail || !password || !normalizedUsername) {
-          return sendJson(res, 400, { success: false, message: 'All registration fields are required.' });
+        const { studentId, subject, date, status } = await readJsonBody(req);
+        if (!asText(studentId) || !asText(subject) || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !['Present', 'Absent', 'Late'].includes(status)) {
+          return sendJson(res, 400, { success: false, message: 'Student, subject, date, and a valid status are required.' });
         }
-        if (!useMongo || !mongoDb) {
-          return sendJson(res, 503, { success: false, message: 'Student registration is temporarily unavailable.' });
-        }
-
-        const existingStudent = await mongoDb.collection('student_logins').findOne({
-          $or: [{ username: normalizedUsername }, { email: normalizedEmail }, { studentId: String(studentId).trim() }]
-        });
-        if (existingStudent) {
-          return sendJson(res, 409, { success: false, message: 'A student account with those details already exists.' });
-        }
-
-        const student = {
-          name: String(name).trim(),
-          studentId: String(studentId).trim(),
-          username: normalizedUsername,
-          email: normalizedEmail,
-          password: await bcryptjs.hash(password, 12),
-          createdAt: new Date()
-        };
-        await mongoDb.collection('student_logins').insertOne(student);
-        return sendJson(res, 201, { success: true, message: 'Registration successful. Please sign in.' });
+        const student = await getStudentByIdentifier(asText(studentId));
+        if (!student) return sendJson(res, 404, { success: false, message: 'Student record not found.' });
+        const record = { studentId: student.studentId, studentName: student.name, subject: asText(subject), date, status, updatedAt: new Date() };
+        await mongoDb.collection('attendance_logs').updateOne(
+          { studentId: record.studentId, subject: record.subject, date: record.date },
+          { $set: record, $setOnInsert: { createdAt: new Date() } },
+          { upsert: true }
+        );
+        return sendJson(res, 200, { success: true, data: record });
       } catch {
-        return sendJson(res, 400, { success: false, message: 'Invalid registration request.' });
+        return sendJson(res, 400, { success: false, message: 'Invalid attendance request.' });
       }
-    });
-    return;
+    }
+  }
+
+  if (url.pathname === '/api/grades') {
+    const user = authenticateToken(req);
+    if (!user || (!requireRole(user, 'Program Head') && !requireRole(user, 'Faculty'))) {
+      return sendJson(res, 403, { success: false, message: 'Staff access is required.' });
+    }
+    if (req.method === 'GET') {
+      const filter = {};
+      if (url.searchParams.get('subject')) filter.subject = url.searchParams.get('subject');
+      if (url.searchParams.get('term')) filter.term = url.searchParams.get('term');
+      const data = useMongo ? await mongoDb.collection('grade_records').find(filter).sort({ updatedAt: -1 }).toArray() : [];
+      return sendJson(res, 200, { success: true, data });
+    }
+    if (req.method === 'POST') {
+      if (!requireRole(user, 'Program Head')) return sendJson(res, 403, { success: false, message: 'Program Head access is required.' });
+      try {
+        const payload = await readJsonBody(req);
+        const student = await getStudentByIdentifier(asText(payload.studentId));
+        const subject = asText(payload.subject);
+        const term = asText(payload.term) || 'Term 1 2026';
+        if (!student || !subject) return sendJson(res, 400, { success: false, message: 'A valid student and subject are required.' });
+        const grades = {};
+        for (const field of ['midterm', 'final']) {
+          if (payload[field] === '' || payload[field] === undefined) continue;
+          const score = Number(payload[field]);
+          if (!Number.isFinite(score) || score < 0 || score > 100) return sendJson(res, 400, { success: false, message: 'Grades must be between 0 and 100.' });
+          grades[field] = score;
+        }
+        const existing = await mongoDb.collection('grade_records').findOne({ studentId: student.studentId, subject, term });
+        const midterm = grades.midterm ?? existing?.midterm;
+        const final = grades.final ?? existing?.final;
+        const record = { studentId: student.studentId, studentName: student.name, subject, term, ...grades, updatedAt: new Date() };
+        if (Number.isFinite(midterm) && Number.isFinite(final)) record.average = Number(((midterm + final) / 2).toFixed(2));
+        await mongoDb.collection('grade_records').updateOne(
+          { studentId: student.studentId, subject, term },
+          { $set: record, $setOnInsert: { createdAt: new Date() } },
+          { upsert: true }
+        );
+        return sendJson(res, 200, { success: true, data: { ...existing, ...record, midterm, final } });
+      } catch {
+        return sendJson(res, 400, { success: false, message: 'Invalid grade request.' });
+      }
+    }
+  }
+
+  if (url.pathname === '/api/summary' && req.method === 'GET') {
+    const user = authenticateToken(req);
+    if (!user || (!requireRole(user, 'Program Head') && !requireRole(user, 'Faculty'))) return sendJson(res, 403, { success: false, message: 'Staff access is required.' });
+    const [studentCount, attendance, grades] = await Promise.all([
+      mongoDb.collection('students').countDocuments(),
+      mongoDb.collection('attendance_logs').find({}).toArray(),
+      mongoDb.collection('grade_records').find({ average: { $exists: true } }).toArray()
+    ]);
+    const present = attendance.filter((record) => record.status === 'Present').length;
+    const late = attendance.filter((record) => record.status === 'Late').length;
+    const classAverage = grades.length ? Number((grades.reduce((total, record) => total + record.average, 0) / grades.length).toFixed(2)) : null;
+    return sendJson(res, 200, { success: true, data: { studentCount, present, late, attendanceRate: attendance.length ? Math.round((present / attendance.length) * 100) : null, classAverage, atRisk: grades.filter((record) => record.average < 75).length, pendingGrades: studentCount - new Set(grades.map((record) => record.studentId)).size } });
+  }
+
+  if (url.pathname === '/api/my-records' && req.method === 'GET') {
+    const user = authenticateToken(req);
+    if (!requireRole(user, 'Student')) return sendJson(res, 403, { success: false, message: 'Student access is required.' });
+    const login = await mongoDb.collection('student_logins').findOne({ username: user.username });
+    if (!login) return sendJson(res, 404, { success: false, message: 'Student account not found.' });
+    const [student, attendance, grades] = await Promise.all([
+      mongoDb.collection('students').findOne({ studentId: login.studentId }),
+      mongoDb.collection('attendance_logs').find({ studentId: login.studentId }).sort({ date: -1 }).toArray(),
+      mongoDb.collection('grade_records').find({ studentId: login.studentId }).sort({ updatedAt: -1 }).toArray()
+    ]);
+    return sendJson(res, 200, { success: true, data: { student, attendance, grades } });
+  }
+
+  if (url.pathname === '/api/change-password' && req.method === 'POST') {
+    const user = authenticateToken(req);
+    if (!user) return sendJson(res, 401, { success: false, message: 'Unauthorized' });
+    try {
+      const { currentPassword, newPassword } = await readJsonBody(req);
+      if (!newPassword || newPassword.length < 8) return sendJson(res, 400, { success: false, message: 'New password must have at least 8 characters.' });
+      const collection = requireRole(user, 'Student') ? 'student_logins' : 'users';
+      const account = await mongoDb.collection(collection).findOne({ username: user.username });
+      if (!account || !await bcryptjs.compare(currentPassword || '', account.password)) return sendJson(res, 401, { success: false, message: 'Current password is incorrect.' });
+      await mongoDb.collection(collection).updateOne({ _id: account._id }, { $set: { password: await bcryptjs.hash(newPassword, 12), mustChangePassword: false, passwordChangedAt: new Date() } });
+      return sendJson(res, 200, { success: true, message: 'Password updated.' });
+    } catch {
+      return sendJson(res, 400, { success: false, message: 'Invalid password request.' });
+    }
   }
 
   const studentUpdateMatch = url.pathname.match(/^\/api\/students\/([a-f\d]{24})$/i);
+  if (studentUpdateMatch && req.method === 'DELETE') {
+    if (!requireProgramHead(req, res)) return;
+    const studentCollection = mongoDb.collection('students');
+    const student = await studentCollection.findOne({ _id: new ObjectId(studentUpdateMatch[1]) });
+    if (!student) return sendJson(res, 404, { success: false, message: 'Student record not found.' });
+    await Promise.all([
+      studentCollection.deleteOne({ _id: student._id }),
+      mongoDb.collection('attendance_logs').deleteMany({ studentId: student.studentId }),
+      mongoDb.collection('grade_records').deleteMany({ studentId: student.studentId })
+    ]);
+    return sendJson(res, 204, {});
+  }
+
   if (studentUpdateMatch && req.method === 'PATCH') {
     const user = authenticateToken(req);
     if (!requireRole(user, 'Program Head')) return sendJson(res, 403, { success: false, message: 'Forbidden' });
@@ -257,6 +394,17 @@ const server = http.createServer(async (req, res) => {
         const studentCollection = mongoDb.collection('students');
         const existingStudent = await studentCollection.findOne({ _id: new ObjectId(studentUpdateMatch[1]) });
         if (!existingStudent) return sendJson(res, 404, { success: false, message: 'Student record not found.' });
+
+        for (const field of ['name', 'course', 'year', 'status', 'email']) {
+          if (Object.hasOwn(payload, field) && asText(payload[field])) updates[field] = asText(payload[field]);
+        }
+        if (Object.hasOwn(payload, 'studentId') && asText(payload.studentId) && asText(payload.studentId) !== existingStudent.studentId) {
+          const studentId = asText(payload.studentId);
+          if (await studentCollection.findOne({ studentId, _id: { $ne: existingStudent._id } })) {
+            return sendJson(res, 409, { success: false, message: 'That student ID is already in use.' });
+          }
+          updates.studentId = studentId;
+        }
 
         if (Object.hasOwn(payload, 'attendance')) {
           const attendanceOptions = ['Present', 'Absent', 'Late', 'Not recorded'];
@@ -319,10 +467,18 @@ const server = http.createServer(async (req, res) => {
       let body = '';
       req.on('data', chunk => body += chunk);
       req.on('end', async () => {
-        const payload = JSON.parse(body);
-        const newStudent = { ...payload, createdAt: new Date() };
-        const result = await mongoDb.collection('students').insertOne(newStudent);
-        sendJson(res, 201, { success: true, data: { ...newStudent, _id: result.insertedId } });
+        try {
+          const payload = JSON.parse(body || '{}');
+          const studentId = asText(payload.studentId);
+          const name = asText(payload.name);
+          if (!studentId || !name) return sendJson(res, 400, { success: false, message: 'Student ID and name are required.' });
+          if (await mongoDb.collection('students').findOne({ studentId })) return sendJson(res, 409, { success: false, message: 'That student ID is already in use.' });
+          const newStudent = { ...payload, studentId, name, createdAt: new Date() };
+          const result = await mongoDb.collection('students').insertOne(newStudent);
+          sendJson(res, 201, { success: true, data: { ...newStudent, _id: result.insertedId } });
+        } catch {
+          sendJson(res, 400, { success: false, message: 'Invalid student request.' });
+        }
       });
       return;
     }
