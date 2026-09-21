@@ -37,7 +37,7 @@
           <p id="auth-message" class="auth-message" role="status"></p>
         </form>
 
-        <a href="student.html" class="auth-link">Student sign-in / register here</a>
+        <a href="student.html" class="auth-link">Student sign-in help</a>
       </div>
     </div>
 
@@ -58,10 +58,6 @@
           <a class="nav-item nav-role-student hidden" href="#student-grades">My Grades</a>
         </nav>
 
-        <div class="sidebar-card">
-          <h3>Security</h3>
-          <p>RBAC and ABAC controls protect academic records and limit access by role and attribute.</p>
-        </div>
       </aside>
 
       <main class="dashboard-main">
@@ -97,22 +93,22 @@
         <section class="stats-grid">
           <article class="stat-card">
             <p class="stat-label">Present Today</p>
-            <h3>—</h3>
+            <h3 id="summary-present">—</h3>
             <span class="stat-trend positive">Waiting for data</span>
           </article>
           <article class="stat-card">
             <p class="stat-label">Late Arrivals</p>
-            <h3>—</h3>
+            <h3 id="summary-late">—</h3>
             <span class="stat-trend">Waiting for data</span>
           </article>
           <article class="stat-card">
             <p class="stat-label">Class Average</p>
-            <h3>—</h3>
+            <h3 id="summary-average">—</h3>
             <span class="stat-trend positive">Waiting for data</span>
           </article>
           <article class="stat-card">
             <p class="stat-label">Pending Grades</p>
-            <h3>—</h3>
+            <h3 id="summary-pending">—</h3>
             <span class="stat-trend">Waiting for data</span>
           </article>
         </section>
@@ -199,6 +195,7 @@
             </div>
             <div class="topbar-actions">
               <span class="badge" id="student-role-badge">Student • Read Only</span>
+              <button id="change-password-btn" type="button" class="btn btn-primary">Change Password</button>
               <button id="student-logout-btn" type="button" class="btn btn-secondary">Logout</button>
             </div>
           </header>
@@ -252,23 +249,7 @@
                     <th>Status</th>
                   </tr>
                 </thead>
-                <tbody>
-                  <tr>
-                    <td>—</td>
-                    <td>—</td>
-                    <td><span class="status-pill success">—</span></td>
-                  </tr>
-                  <tr>
-                    <td>—</td>
-                    <td>—</td>
-                    <td><span class="status-pill success">—</span></td>
-                  </tr>
-                  <tr>
-                    <td>—</td>
-                    <td>—</td>
-                    <td><span class="status-pill warning">—</span></td>
-                  </tr>
-                </tbody>
+                <tbody id="my-attendance-body"><tr><td colspan="3">Loading records...</td></tr></tbody>
               </table>
             </article>
 
@@ -284,20 +265,7 @@
                     <th>Grade</th>
                   </tr>
                 </thead>
-                <tbody>
-                  <tr>
-                    <td>—</td>
-                    <td>—</td>
-                  </tr>
-                  <tr>
-                    <td>—</td>
-                    <td>—</td>
-                  </tr>
-                  <tr>
-                    <td>—</td>
-                    <td>—</td>
-                  </tr>
-                </tbody>
+                <tbody id="my-grades-body"><tr><td colspan="2">Loading records...</td></tr></tbody>
               </table>
             </article>
           </section>
@@ -319,6 +287,8 @@
       const activityList = document.getElementById('activity-list');
       const studentWelcomeName = document.getElementById('student-welcome-name');
       const studentRecordsBody = document.getElementById('student-records-body');
+      const myAttendanceBody = document.getElementById('my-attendance-body');
+      const myGradesBody = document.getElementById('my-grades-body');
 
       const rosterData = [];
 
@@ -361,6 +331,21 @@
         }
       }
 
+      async function loadMyRecords() {
+        try {
+          const response = await fetch('/api/my-records', { headers: getAuthHeaders() });
+          const result = await response.json();
+          if (!response.ok || !result.success) throw new Error(result.message || 'Unable to load records');
+          const { student, attendance = [], grades = [] } = result.data;
+          if (studentWelcomeName && student?.name) studentWelcomeName.textContent = `Welcome, ${student.name}`;
+          myAttendanceBody.innerHTML = attendance.length ? attendance.map((record) => `<tr><td>${record.subject}</td><td>${record.date}</td><td><span class="status-pill ${record.status === 'Absent' ? 'warning' : 'success'}">${record.status}</span></td></tr>`).join('') : '<tr><td colspan="3">No attendance has been recorded.</td></tr>';
+          myGradesBody.innerHTML = grades.length ? grades.map((record) => `<tr><td>${record.subject} (${record.term})</td><td>${record.average ?? 'Pending'}</td></tr>`).join('') : '<tr><td colspan="2">No grades have been recorded.</td></tr>';
+        } catch (error) {
+          myAttendanceBody.innerHTML = '<tr><td colspan="3">Unable to load attendance.</td></tr>';
+          myGradesBody.innerHTML = '<tr><td colspan="2">Unable to load grades.</td></tr>';
+        }
+      }
+
       async function loadActivityFeed() {
         try {
           const response = await fetch('/api/activity', {
@@ -386,6 +371,21 @@
           if (activityList) {
             activityList.innerHTML = '<li>No recent activity available.</li>';
           }
+        }
+      }
+
+      async function loadSummary() {
+        try {
+          const response = await fetch('/api/summary', { headers: getAuthHeaders() });
+          const result = await response.json();
+          if (!response.ok || !result.success) throw new Error('Unable to load summary');
+          const summary = result.data;
+          document.getElementById('summary-present').textContent = summary.present;
+          document.getElementById('summary-late').textContent = summary.late;
+          document.getElementById('summary-average').textContent = summary.classAverage ?? '—';
+          document.getElementById('summary-pending').textContent = summary.pendingGrades;
+        } catch (error) {
+          console.error('Summary load error:', error);
         }
       }
 
@@ -519,6 +519,9 @@
         if (role && role.toLowerCase() !== 'student') {
           loadStudentRecords();
           loadActivityFeed();
+          loadSummary();
+        } else if (role) {
+          loadMyRecords();
         }
       }
 
@@ -527,6 +530,9 @@
         if (role && role.toLowerCase() !== 'student') {
           loadStudentRecords();
           loadActivityFeed();
+          loadSummary();
+        } else if (role) {
+          loadMyRecords();
         }
       }, 5000);
 
@@ -636,8 +642,10 @@
         }
       });
 
-      exportReportBtn.addEventListener('click', () => {
-        const reportBody = `UCC Academic Report\nAttendance: 96.4%\nAverage Grade: 88%\nPending Grades: 7\n`;
+      exportReportBtn.addEventListener('click', async () => {
+        const result = await (await fetch('/api/summary', { headers: getAuthHeaders() })).json();
+        const summary = result.data || {};
+        const reportBody = `UCC Academic Report\nStudents: ${summary.studentCount ?? '—'}\nAttendance: ${summary.attendanceRate ?? '—'}%\nAverage Grade: ${summary.classAverage ?? '—'}\nPending Grades: ${summary.pendingGrades ?? '—'}\n`;
         const blob = new Blob([reportBody], { type: 'text/plain;charset=utf-8' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
@@ -645,6 +653,20 @@
         link.download = 'ucc-academic-report.txt';
         link.click();
         URL.revokeObjectURL(url);
+      });
+
+      document.getElementById('change-password-btn').addEventListener('click', async () => {
+        const currentPassword = prompt('Enter your current password:');
+        if (currentPassword === null) return;
+        const newPassword = prompt('Enter a new password (at least 8 characters):');
+        if (newPassword === null) return;
+        const response = await fetch('/api/change-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+          body: JSON.stringify({ currentPassword, newPassword })
+        });
+        const result = await response.json();
+        alert(result.message || (result.success ? 'Password updated.' : 'Unable to update password.'));
       });
 
       async function logout() {
