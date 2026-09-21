@@ -69,9 +69,9 @@ Set `PROGRAM_HEAD_PASSWORD` before the first startup, and do not commit password
 
 ## Using The Portal
 
-Program Heads can use the Students page to add and maintain academic student records. Attendance is saved per selected subject and date. Grades are saved per selected subject and term; either Midterm or Final may be left blank.
+Program Heads can use the Students page to add and maintain academic student records. Program Heads and Faculty can save attendance and grades. Attendance is saved per selected subject and date. Grades are saved per selected subject and term; either Midterm or Final may be left blank.
 
-Faculty may view student records, attendance, grades, and reports but cannot make changes. Students can view only their own records after an account has been provisioned.
+Students can view only their own records after an account has been provisioned. Program Heads can retrieve the 200 most recent academic changes through `GET /api/audit-logs`; each entry includes the acting user, target record, prior value, submitted change, and timestamp.
 
 ## Data Collections
 
@@ -80,6 +80,7 @@ Faculty may view student records, attendance, grades, and reports but cannot mak
 - `student_logins`: Student credentials
 - `attendance_logs`: Dated subject attendance entries
 - `grade_records`: Subject and term grade entries
+- `audit_logs`: Immutable attendance and grade change history
 
 The server automatically migrates legacy credential records out of `students` and legacy academic records from `studentRecords` when it starts.
 
