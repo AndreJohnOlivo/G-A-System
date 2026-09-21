@@ -88,7 +88,7 @@
                 try {
                     const sessionResponse = await fetch('/api/session', { headers: getAuthHeaders() });
                     const session = await sessionResponse.json();
-                    canManageAttendance = session.session?.role === 'Program Head';
+                    canManageAttendance = ['Program Head', 'Faculty'].includes(session.session?.role);
 
                     const [studentsResponse, attendanceResponse] = await Promise.all([
                         fetch('/api/students', { headers: getAuthHeaders() }),
@@ -99,7 +99,7 @@
                     const students = result.data || [];
                     const records = attendanceResult.data || [];
 
-                    if (!response.ok || !result.success) throw new Error('Unable to load students');
+                    if (!studentsResponse.ok || !attendanceResponse.ok || !result.success || !attendanceResult.success) throw new Error('Unable to load students');
                     if (!students.length) {
                         attendanceRecordsBody.innerHTML = '<tr><td colspan="6">No student records available yet.</td></tr>';
                         return;

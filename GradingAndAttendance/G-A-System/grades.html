@@ -111,7 +111,7 @@
         try {
           const sessionResponse = await fetch('/api/session', { headers: getAuthHeaders() });
           const session = await sessionResponse.json();
-          canManageGrades = session.session?.role === 'Program Head';
+          canManageGrades = ['Program Head', 'Faculty'].includes(session.session?.role);
 
           const [studentsResponse, gradesResponse] = await Promise.all([
             fetch('/api/students', { headers: getAuthHeaders() }),
@@ -122,7 +122,7 @@
           const students = result.data || [];
           const records = gradesResult.data || [];
 
-          if (!response.ok || !result.success) throw new Error('Unable to load students');
+          if (!studentsResponse.ok || !gradesResponse.ok || !result.success || !gradesResult.success) throw new Error('Unable to load students');
           if (!students.length) {
             gradeRecordsBody.innerHTML = '<tr><td colspan="6">No student records available yet.</td></tr>';
             return;

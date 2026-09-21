@@ -22,10 +22,6 @@
           <a class="nav-item" href="reports.html">Reports</a>
         </nav>
 
-        <div class="sidebar-card">
-          <h3>Security</h3>
-          <p>RBAC and ABAC controls protect academic records and limit access by role and attribute.</p>
-        </div>
       </aside>
 
       <main class="dashboard-main">
@@ -77,6 +73,7 @@
                 <th>Course</th>
                 <th>Year</th>
                 <th>Status</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody id="students-tbody">
@@ -91,10 +88,11 @@
     <div id="student-modal" class="modal" aria-hidden="true">
       <div class="modal-content">
         <button id="close-modal" class="modal-close">✕</button>
-        <h2>Add Student</h2>
+        <h2 id="student-modal-title">Add Student</h2>
         <form id="student-form">
           <label>Full name<input name="name" required /></label>
-          <label>Student ID<input name="studentId" /></label>
+          <label>Student ID<input name="studentId" required /></label>
+          <label>Email<input name="email" type="email" /></label>
           <label>Course<input name="course" /></label>
           <label>Year<input name="year" /></label>
           <label>Status
@@ -104,22 +102,13 @@
               <option>Pending</option>
             </select>
           </label>
-          <div style="margin-top:12px">
+          <div class="modal-actions">
             <button type="submit" class="btn btn-primary">Save</button>
             <button type="button" id="cancel-btn" class="btn">Cancel</button>
           </div>
         </form>
       </div>
     </div>
-
-    <style>
-      .modal { position: fixed; inset: 0; display:none; background: rgba(0,0,0,0.4); align-items:center; justify-content:center; }
-      .modal[aria-hidden="false"] { display:flex; }
-      .modal-content { background:#fff; padding:18px; border-radius:6px; width:320px; box-shadow:0 6px 24px rgba(0,0,0,.2); position:relative }
-      .modal-close { position:absolute; right:8px; top:8px; border:none; background:transparent; font-size:16px }
-      .modal-content label { display:block; margin:8px 0 }
-      .modal-content input, .modal-content select { width:100%; padding:6px; margin-top:4px }
-    </style>
 
     <script>
       (function(){
@@ -129,14 +118,25 @@
         const cancelBtn = document.getElementById('cancel-btn');
         const form = document.getElementById('student-form');
         const tbody = document.getElementById('students-tbody');
+        const modalTitle = document.getElementById('student-modal-title');
+        const studentsById = new Map();
+        let editingStudentId = null;
 
         function getAuthHeaders() {
           const token = sessionStorage.getItem('uccAccessToken');
           return token ? { Authorization: `Bearer ${token}` } : {};
         }
 
-        function showModal() { modal.setAttribute('aria-hidden','false'); }
-        function hideModal() { modal.setAttribute('aria-hidden','true'); form.reset(); }
+        function showModal(student) {
+          editingStudentId = student?._id || null;
+          modalTitle.textContent = editingStudentId ? 'Edit Student' : 'Add Student';
+          form.reset();
+          if (student) {
+            for (const field of ['name', 'studentId', 'email', 'course', 'year', 'status']) form.elements[field].value = student[field] || '';
+          }
+          modal.setAttribute('aria-hidden','false');
+        }
+        function hideModal() { modal.setAttribute('aria-hidden','true'); form.reset(); editingStudentId = null; }
 
         function makeRow(student) {
           const tr = document.createElement('tr');
@@ -147,17 +147,25 @@
             <td>${escapeHtml(student.course || '—')}</td>
             <td>${escapeHtml(student.year || '—')}</td>
             <td><span class="status-pill ${student.status && student.status.toLowerCase()==='inactive' ? 'warning' : 'success'}">${escapeHtml(student.status||'—')}</span></td>
+            <td>
+              <button class="btn btn-secondary edit-student-btn" type="button" data-student-id="${student._id}">Edit</button>
+              <button class="btn btn-secondary delete-student-btn" type="button" data-student-id="${student._id}">Delete</button>
+            </td>
           `;
           return tr;
         }
 
         function renderStudents(list) {
           tbody.innerHTML = '';
+          studentsById.clear();
           if (!list || !list.length) {
             tbody.innerHTML = `<tr><td colspan="5">No students found.</td></tr>`;
             return;
           }
-          for (const s of list) tbody.appendChild(makeRow(s));
+          for (const student of list) {
+            studentsById.set(String(student._id), student);
+            tbody.appendChild(makeRow(student));
+          }
         }
 
         function appendStudent(s) { 
@@ -197,31 +205,47 @@
           ev.preventDefault();
           const data = Object.fromEntries(new FormData(form).entries());
           try {
-            const res = await fetch('/api/students', {
-              method: 'POST', headers: { 'Content-Type':'application/json', ...getAuthHeaders() },
+            const res = await fetch(editingStudentId ? `/api/students/${editingStudentId}` : '/api/students', {
+              method: editingStudentId ? 'PATCH' : 'POST', headers: { 'Content-Type':'application/json', ...getAuthHeaders() },
               body: JSON.stringify(data)
             });
             const json = await res.json();
             if (json && json.success) {
               hideModal();
-              appendStudent(json.data);
+              await load();
             } else {
-              alert('Failed to add student: ' + (json && json.message ? json.message : res.statusText));
+              alert('Failed to save student: ' + (json && json.message ? json.message : res.statusText));
             }
           } catch (err) {
             alert('Request failed: ' + err.message);
           }
         });
 
+        tbody.addEventListener('click', async (event) => {
+          const deleteButton = event.target.closest('.delete-student-btn');
+          if (deleteButton) {
+            if (!confirm('Delete this student and all associated attendance and grades?')) return;
+            const response = await fetch(`/api/students/${deleteButton.dataset.studentId}`, { method: 'DELETE', headers: getAuthHeaders() });
+            if (!response.ok) return alert('Unable to delete this student.');
+            load();
+            return;
+          }
+          const editButton = event.target.closest('.edit-student-btn');
+          if (!editButton) return;
+          const student = studentsById.get(editButton.dataset.studentId);
+          if (student) showModal(student);
+        });
+
         // initial load
-        (async function load(){
+        async function load(){
           try {
             const r = await fetch('/api/students', { headers: getAuthHeaders() });
             const j = await r.json();
             if (j && j.success) renderStudents(j.data);
             else tbody.innerHTML = `<tr><td colspan="5">Failed to load students.</td></tr>`;
           } catch (err) { tbody.innerHTML = `<tr><td colspan="5">Error loading students.</td></tr>`; }
-        })();
+        }
+        load();
 
       })();
     </script>

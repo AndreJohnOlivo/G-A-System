@@ -1,0 +1,14 @@
+{
+  "name": "ucc-gas-backend",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "import:students": "node import_registrar_students.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "jsonwebtoken": "^9.0.3",
+    "mongodb": "^5.7.0"
+  }
+}

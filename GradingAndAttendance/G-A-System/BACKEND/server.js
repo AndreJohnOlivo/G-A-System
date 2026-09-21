@@ -65,7 +65,8 @@ async function connectToMongo(uri) {
     await Promise.all([
       mongoDb.collection('students').createIndex({ studentId: 1 }, { unique: true, sparse: true }),
       mongoDb.collection('attendance_logs').createIndex({ studentId: 1, subject: 1, date: 1 }, { unique: true }),
-      mongoDb.collection('grade_records').createIndex({ studentId: 1, subject: 1, term: 1 }, { unique: true })
+      mongoDb.collection('grade_records').createIndex({ studentId: 1, subject: 1, term: 1 }, { unique: true }),
+      mongoDb.collection('audit_logs').createIndex({ createdAt: -1 })
     ]);
     await seedProgramHeadAccount();
     await migrateStudentCollections();
@@ -163,11 +164,24 @@ async function saveGradeRecord(student, subject, term, grades) {
   ];
 
   try {
-    return await mongoDb.collection('grade_records').findOneAndUpdate(filter, update, { upsert: true, returnDocument: 'after' });
+    const result = await mongoDb.collection('grade_records').findOneAndUpdate(filter, update, { upsert: true, returnDocument: 'before' });
+    return { previous: result.value, record: await mongoDb.collection('grade_records').findOne(filter) };
   } catch (err) {
     if (err.code !== 11000) throw err;
-    return mongoDb.collection('grade_records').findOneAndUpdate(filter, update, { returnDocument: 'after' });
+    const result = await mongoDb.collection('grade_records').findOneAndUpdate(filter, update, { returnDocument: 'before' });
+    return { previous: result.value, record: await mongoDb.collection('grade_records').findOne(filter) };
   }
+}
+
+async function createAuditLog(user, action, target, previous, changes) {
+  await mongoDb.collection('audit_logs').insertOne({
+    action,
+    actor: { username: user.username, role: user.role },
+    target,
+    previous: previous || null,
+    changes,
+    createdAt: new Date()
+  });
 }
 
 async function getStudentByIdentifier(identifier) {
@@ -306,7 +320,6 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { success: true, data });
     }
     if (req.method === 'POST') {
-      if (!requireRole(user, 'Program Head')) return sendJson(res, 403, { success: false, message: 'Program Head access is required.' });
       try {
         const { studentId, subject, date, status } = await readJsonBody(req);
         if (!asText(studentId) || !asText(subject) || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !['Present', 'Absent', 'Late'].includes(status)) {
@@ -315,11 +328,12 @@ const server = http.createServer(async (req, res) => {
         const student = await getStudentByIdentifier(asText(studentId));
         if (!student) return sendJson(res, 404, { success: false, message: 'Student record not found.' });
         const record = { studentId: student.studentId, studentName: student.name, subject: asText(subject), date, status, updatedAt: new Date() };
-        await mongoDb.collection('attendance_logs').updateOne(
+        const result = await mongoDb.collection('attendance_logs').findOneAndUpdate(
           { studentId: record.studentId, subject: record.subject, date: record.date },
           { $set: record, $setOnInsert: { createdAt: new Date() } },
-          { upsert: true }
+          { upsert: true, returnDocument: 'before' }
         );
+        await createAuditLog(user, 'attendance.saved', { studentId: record.studentId, subject: record.subject, date }, result.value, { status });
         return sendJson(res, 200, { success: true, data: record });
       } catch {
         return sendJson(res, 400, { success: false, message: 'Invalid attendance request.' });
@@ -340,7 +354,6 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { success: true, data });
     }
     if (req.method === 'POST') {
-      if (!requireRole(user, 'Program Head')) return sendJson(res, 403, { success: false, message: 'Program Head access is required.' });
       try {
         const payload = await readJsonBody(req);
         const student = await getStudentByIdentifier(asText(payload.studentId));
@@ -355,7 +368,8 @@ const server = http.createServer(async (req, res) => {
           grades[field] = score;
         }
         const result = await saveGradeRecord(student, subject, term, grades);
-        return sendJson(res, 200, { success: true, data: result.value });
+        await createAuditLog(user, 'grade.saved', { studentId: student.studentId, subject, term }, result.previous, grades);
+        return sendJson(res, 200, { success: true, data: result.record });
       } catch {
         return sendJson(res, 400, { success: false, message: 'Invalid grade request.' });
       }
@@ -374,6 +388,12 @@ const server = http.createServer(async (req, res) => {
     const late = attendance.filter((record) => record.status === 'Late').length;
     const classAverage = grades.length ? Number((grades.reduce((total, record) => total + record.average, 0) / grades.length).toFixed(2)) : null;
     return sendJson(res, 200, { success: true, data: { studentCount, present, late, attendanceRate: attendance.length ? Math.round((present / attendance.length) * 100) : null, classAverage, atRisk: grades.filter((record) => record.average < 75).length, pendingGrades: studentCount - new Set(grades.map((record) => record.studentId)).size } });
+  }
+
+  if (url.pathname === '/api/audit-logs' && req.method === 'GET') {
+    if (!requireProgramHead(req, res)) return;
+    const data = await mongoDb.collection('audit_logs').find({}).sort({ createdAt: -1 }).limit(200).toArray();
+    return sendJson(res, 200, { success: true, data });
   }
 
   if (url.pathname === '/api/my-records' && req.method === 'GET') {
