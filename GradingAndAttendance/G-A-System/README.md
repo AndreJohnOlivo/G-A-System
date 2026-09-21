@@ -67,15 +67,17 @@ The server creates or updates the Program Head account at startup:
 
 Set `PROGRAM_HEAD_PASSWORD` before the first startup, and do not commit passwords or secrets.
 
+For local testing, the server also creates a Faculty account assigned to `CS 101` at startup. Sign in as Faculty with username `test.faculty` and password `faculty.test1`. Override this password through `TEST_FACULTY_PASSWORD`, and replace or remove the account before production deployment.
+
 ## Using The Portal
 
-Program Heads can use the Students page to add and maintain academic student records. Program Heads and Faculty can save attendance and grades. Attendance is saved per selected subject and date. Grades are saved per selected subject and term; either Midterm or Final may be left blank.
+Program Heads can use the Students page to add and maintain academic student records. The Faculty page lets Program Heads create Faculty accounts and assign a comma-separated list of subjects. Faculty can read and save attendance and grades only for their assigned subjects; unassigned subjects are blocked by the server. Attendance is saved per selected subject and date. Grades are saved per selected subject and term; either Midterm or Final may be left blank.
 
 Students can view only their own records after an account has been provisioned. Program Heads can retrieve the 200 most recent academic changes through `GET /api/audit-logs`; each entry includes the acting user, target record, prior value, submitted change, and timestamp.
 
 ## Data Collections
 
-- `users`: Staff credentials and roles
+- `users`: Staff credentials, roles, account status, and faculty subject assignments
 - `students`: Academic student records
 - `student_logins`: Student credentials
 - `attendance_logs`: Dated subject attendance entries

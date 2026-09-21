@@ -604,6 +604,7 @@
             sessionStorage.setItem('uccAccessRole', 'Student');
             sessionStorage.setItem('uccAccessToken', result.token);
             sessionStorage.setItem('currentStudentName', result.student?.name || 'Student');
+            window.dispatchEvent(new Event('ucc:session-start'));
             authMessage.textContent = `Welcome, ${result.student?.name || 'Student'}.`;
             showDashboard();
             return;
@@ -632,6 +633,7 @@
           sessionStorage.setItem('uccAccessRole', result.role || 'Program Head');
           sessionStorage.setItem('uccAccessToken', result.token);
           sessionStorage.removeItem('currentStudentName');
+          window.dispatchEvent(new Event('ucc:session-start'));
           authMessage.textContent = `Welcome, ${result.role || 'User'}.`;
           showDashboard();
         } catch (error) {
@@ -691,5 +693,6 @@
 
       restoreSession();
     </script>
+    <script src="session-timeout.js"></script>
   </body>
 </html>
