@@ -339,9 +339,9 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 403, { success: false, message: 'Staff access is required.' });
     }
     if (req.method === 'GET') {
-      const filter = await getAcademicFilter(user, url.searchParams.get('subject'));
-      if (!filter) return sendJson(res, 403, { success: false, message: 'You are not assigned to this subject.' });
+      const filter = {};
       if (url.searchParams.get('date')) filter.date = url.searchParams.get('date');
+      if (url.searchParams.get('subject')) filter.subject = url.searchParams.get('subject');
       const data = useMongo ? await mongoDb.collection('attendance_logs').find(filter).sort({ date: -1 }).toArray() : [];
       return sendJson(res, 200, { success: true, data });
     }
@@ -350,9 +350,6 @@ const server = http.createServer(async (req, res) => {
         const { studentId, subject, date, status } = await readJsonBody(req);
         if (!asText(studentId) || !asText(subject) || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !['Present', 'Absent', 'Late'].includes(status)) {
           return sendJson(res, 400, { success: false, message: 'Student, subject, date, and a valid status are required.' });
-        }
-        if (!await requireSubjectAccess(user, asText(subject))) {
-          return sendJson(res, 403, { success: false, message: 'You are not assigned to this subject.' });
         }
         const student = await getStudentByIdentifier(asText(studentId));
         if (!student) return sendJson(res, 404, { success: false, message: 'Student record not found.' });
@@ -376,8 +373,8 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 403, { success: false, message: 'Staff access is required.' });
     }
     if (req.method === 'GET') {
-      const filter = await getAcademicFilter(user, url.searchParams.get('subject'));
-      if (!filter) return sendJson(res, 403, { success: false, message: 'You are not assigned to this subject.' });
+      const filter = {};
+      if (url.searchParams.get('subject')) filter.subject = url.searchParams.get('subject');
       if (url.searchParams.get('term')) filter.term = url.searchParams.get('term');
       const data = useMongo ? await mongoDb.collection('grade_records').find(filter).sort({ updatedAt: -1 }).toArray() : [];
       return sendJson(res, 200, { success: true, data });
@@ -389,9 +386,6 @@ const server = http.createServer(async (req, res) => {
         const subject = asText(payload.subject);
         const term = asText(payload.term) || 'Term 1 2026';
         if (!student || !subject) return sendJson(res, 400, { success: false, message: 'A valid student and subject are required.' });
-        if (!await requireSubjectAccess(user, subject)) {
-          return sendJson(res, 403, { success: false, message: 'You are not assigned to this subject.' });
-        }
         const grades = {};
         for (const field of ['midterm', 'final']) {
           if (payload[field] === '' || payload[field] === undefined) continue;
@@ -405,58 +399,6 @@ const server = http.createServer(async (req, res) => {
       } catch {
         return sendJson(res, 400, { success: false, message: 'Invalid grade request.' });
       }
-    }
-  }
-
-  if (url.pathname === '/api/faculty') {
-    const user = requireProgramHead(req, res);
-    if (!user) return;
-    const facultyCollection = mongoDb.collection('users');
-    if (req.method === 'GET') {
-      const data = await facultyCollection.find({ role: 'Faculty' }, { projection: { password: 0 } }).sort({ name: 1 }).toArray();
-      return sendJson(res, 200, { success: true, data });
-    }
-    if (req.method === 'POST') {
-      try {
-        const payload = await readJsonBody(req);
-        const name = asText(payload.name);
-        const username = asText(payload.username).toLowerCase();
-        const password = String(payload.password || '');
-        const assignedSubjects = normalizeSubjects(payload.assignedSubjects);
-        if (!name || !username || password.length < 8) {
-          return sendJson(res, 400, { success: false, message: 'Name, username, and a password of at least 8 characters are required.' });
-        }
-        const faculty = { name, username, role: 'Faculty', assignedSubjects, active: true, password: await bcryptjs.hash(password, 12), createdAt: new Date() };
-        const result = await facultyCollection.insertOne(faculty);
-        await createAuditLog(user, 'faculty.created', { facultyId: result.insertedId, username }, null, { name, username, assignedSubjects });
-        return sendJson(res, 201, { success: true, data: { ...faculty, _id: result.insertedId, password: undefined } });
-      } catch (err) {
-        if (err.code === 11000) return sendJson(res, 409, { success: false, message: 'That username is already in use.' });
-        return sendJson(res, 400, { success: false, message: 'Invalid faculty account request.' });
-      }
-    }
-  }
-
-  const facultyUpdateMatch = url.pathname.match(/^\/api\/faculty\/([a-f\d]{24})$/i);
-  if (facultyUpdateMatch && req.method === 'PATCH') {
-    const user = requireProgramHead(req, res);
-    if (!user) return;
-    try {
-      const payload = await readJsonBody(req);
-      const facultyCollection = mongoDb.collection('users');
-      const existing = await facultyCollection.findOne({ _id: new ObjectId(facultyUpdateMatch[1]), role: 'Faculty' });
-      if (!existing) return sendJson(res, 404, { success: false, message: 'Faculty account not found.' });
-      const updates = {};
-      if (Object.hasOwn(payload, 'name') && asText(payload.name)) updates.name = asText(payload.name);
-      if (Object.hasOwn(payload, 'assignedSubjects')) updates.assignedSubjects = normalizeSubjects(payload.assignedSubjects);
-      if (Object.hasOwn(payload, 'active') && typeof payload.active === 'boolean') updates.active = payload.active;
-      if (!Object.keys(updates).length) return sendJson(res, 400, { success: false, message: 'No valid faculty updates were provided.' });
-      updates.updatedAt = new Date();
-      const result = await facultyCollection.findOneAndUpdate({ _id: existing._id }, { $set: updates }, { returnDocument: 'after', projection: { password: 0 } });
-      await createAuditLog(user, 'faculty.updated', { facultyId: existing._id, username: existing.username }, existing, updates);
-      return sendJson(res, 200, { success: true, data: result.value });
-    } catch {
-      return sendJson(res, 400, { success: false, message: 'Invalid faculty update request.' });
     }
   }
 
