@@ -4,11 +4,18 @@
   "private": true,
   "scripts": {
     "start": "node server.js",
+    "test": "node --test",
     "import:students": "node import_registrar_students.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
     "jsonwebtoken": "^9.0.3",
     "mongodb": "^5.7.0"
+  },
+  "devDependencies": {
+    "mongodb-memory-server": "^11.3.0"
+  },
+  "devDependencies": {
+    "mongodb-memory-server": "^11.3.0"
   }
 }
