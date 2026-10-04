@@ -24,7 +24,7 @@
           <div>
             <p class="eyebrow">Program Head Controls</p>
             <h1>Faculty Assignments</h1>
-            <p class="topbar-subtitle">Create faculty accounts and set the subjects each instructor may manage.</p>
+            <p class="topbar-subtitle">Approve faculty registrations and assign the subjects each instructor may manage.</p>
           </div>
         </header>
         <section class="card">
@@ -38,6 +38,14 @@
           </form>
         </section>
         <section class="card">
+          <div class="card-header"><h3>Pending Faculty Registrations</h3><span class="badge">Approval required</span></div>
+          <p class="small-text">Review each request and assign at least one subject before approving access.</p>
+          <table>
+            <thead><tr><th>Name</th><th>Username</th><th>Assign subjects</th><th>Action</th></tr></thead>
+            <tbody id="pending-faculty-body"><tr><td colspan="4">Loading registration requests...</td></tr></tbody>
+          </table>
+        </section>
+        <section class="card">
           <div class="card-header"><h3>Faculty Directory</h3><span class="badge">Subject access</span></div>
           <table>
             <thead><tr><th>Name</th><th>Username</th><th>Subjects</th><th>Status</th><th>Action</th></tr></thead>
@@ -48,6 +56,7 @@
     </div>
     <script>
       const facultyBody = document.getElementById('faculty-body');
+      const pendingFacultyBody = document.getElementById('pending-faculty-body');
       const facultyForm = document.getElementById('faculty-form');
       const getHeaders = () => {
         const token = sessionStorage.getItem('uccAccessToken');
@@ -58,13 +67,21 @@
         const response = await fetch('/api/faculty', { headers: getHeaders() });
         const result = await response.json();
         if (!response.ok || !result.success) throw new Error(result.message || 'Unable to load faculty accounts.');
-        facultyBody.innerHTML = result.data.length ? result.data.map((faculty) => `
+        const pending = result.data.filter((faculty) => faculty.registrationStatus === 'pending');
+        const approved = result.data.filter((faculty) => faculty.registrationStatus !== 'pending');
+        pendingFacultyBody.innerHTML = pending.length ? pending.map((faculty) => `
+          <tr>
+            <td>${escapeHtml(faculty.name)}</td><td>${escapeHtml(faculty.username)}</td>
+            <td><input class="pending-subject-input" data-id="${faculty._id}" placeholder="e.g. CS 101, IT 204" /></td>
+            <td><button class="btn btn-primary approve-faculty-btn" type="button" data-id="${faculty._id}">Approve</button></td>
+          </tr>`).join('') : '<tr><td colspan="4">No pending faculty registrations.</td></tr>';
+        facultyBody.innerHTML = approved.length ? approved.map((faculty) => `
           <tr>
             <td>${escapeHtml(faculty.name)}</td><td>${escapeHtml(faculty.username)}</td>
             <td><input class="subject-input" data-id="${faculty._id}" value="${escapeHtml((faculty.assignedSubjects || []).join(', '))}" /></td>
             <td>${faculty.active === false ? 'Inactive' : 'Active'}</td>
             <td><button class="btn btn-secondary save-faculty-btn" type="button" data-id="${faculty._id}" data-active="${faculty.active !== false}">Save</button></td>
-          </tr>`).join('') : '<tr><td colspan="5">No faculty accounts yet.</td></tr>';
+          </tr>`).join('') : '<tr><td colspan="5">No approved faculty accounts yet.</td></tr>';
       }
       facultyForm.addEventListener('submit', async (event) => {
         event.preventDefault();
@@ -82,6 +99,20 @@
         const response = await fetch(`/api/faculty/${button.dataset.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', ...getHeaders() }, body: JSON.stringify({ assignedSubjects: subjects, active: button.dataset.active === 'true' }) });
         const result = await response.json();
         if (!response.ok || !result.success) return alert(result.message || 'Unable to update faculty account.');
+        loadFaculty();
+      });
+      pendingFacultyBody.addEventListener('click', async (event) => {
+        const button = event.target.closest('.approve-faculty-btn');
+        if (!button) return;
+        const subjects = pendingFacultyBody.querySelector(`.pending-subject-input[data-id="${button.dataset.id}"]`).value.trim();
+        if (!subjects) return alert('Assign at least one subject before approving this account.');
+        const response = await fetch(`/api/faculty/${button.dataset.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', ...getHeaders() },
+          body: JSON.stringify({ assignedSubjects: subjects, active: true })
+        });
+        const result = await response.json();
+        if (!response.ok || !result.success) return alert(result.message || 'Unable to approve this account.');
         loadFaculty();
       });
       loadFaculty().catch((error) => { facultyBody.innerHTML = `<tr><td colspan="5">${escapeHtml(error.message)}</td></tr>`; });

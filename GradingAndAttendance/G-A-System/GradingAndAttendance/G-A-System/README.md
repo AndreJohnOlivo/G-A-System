@@ -43,7 +43,23 @@ Start the application:
 npm start
 ```
 
-Open `http://localhost:3000` in a browser.
+Open `http://localhost:3001` in a browser.
+
+### Temporary Student RBAC Testing
+
+To test Student registration without an existing academic student record, enable this development-only setting before starting the server:
+
+```powershell
+$env:NODE_ENV = "development"
+$env:ALLOW_UNLINKED_STUDENT_REGISTRATION = "true"
+npm start
+```
+
+This setting is ignored when `NODE_ENV=production`. Test accounts are saved with the Student role but have no academic records, so their attendance and grades will be empty. Unset the setting after testing:
+
+```powershell
+Remove-Item Env:ALLOW_UNLINKED_STUDENT_REGISTRATION
+```
 
 ## Load-Balanced Deployment
 
