@@ -79,6 +79,36 @@ a:hover {
   gap: 8px;
 }
 
+.nav-disclosure {
+  margin: 0;
+}
+
+.nav-disclosure summary {
+  cursor: pointer;
+  padding: 10px 12px;
+  color: #f8f3e5;
+  font-weight: 600;
+  list-style: none;
+}
+
+.nav-disclosure summary::-webkit-details-marker {
+  display: none;
+}
+
+.nav-disclosure summary::after {
+  content: '+';
+  float: right;
+}
+
+.nav-disclosure[open] summary::after {
+  content: '-';
+}
+
+.nav-disclosure .nav-item {
+  display: block;
+  margin-left: 10px;
+}
+
 .nav-item {
   padding: 10px 12px;
   border-radius: 10px;
