@@ -9,20 +9,11 @@
   <body>
     <div id="login-screen" class="auth-shell">
       <div class="auth-card">
-        <p class="eyebrow">Authorized Access Only</p>
-        <h1>UCC Program Head &amp; Staff Portal</h1>
-        <p class="auth-intro">This portal is reserved for Program Heads and UCC Members & Students only.</p>
+        <p class="eyebrow">UCC Academic Portal</p>
+        <h1>Sign in to your account</h1>
+        <p class="auth-intro">Your account role determines which academic tools and records you can access.</p>
 
         <form id="login-form" class="auth-form">
-          <label class="auth-field">
-            <span>Select role</span>
-            <select id="role-select" name="role">
-              <option value="programhead">Program Head</option>
-              <option value="faculty">Faculty</option>
-              <option value="student">Student</option>
-            </select>
-          </label>
-
           <label class="auth-field">
             <span>Username or Email</span>
             <input id="username" name="username" type="text" placeholder="Enter your username" required />
@@ -34,10 +25,42 @@
           </label>
 
           <button type="submit" class="btn btn-primary auth-submit">Access Portal</button>
-          <p id="auth-message" class="auth-message" role="status"></p>
         </form>
 
-        <a href="student.html" class="auth-link">Student sign-in help</a>
+        <form id="registration-form" class="auth-form registration-panel hidden">
+          <label class="auth-field">
+            <span>Register as</span>
+            <select id="registration-role" name="role" required>
+              <option value="student">Student</option>
+              <option value="faculty">Faculty</option>
+            </select>
+          </label>
+
+          <label id="student-id-field" class="auth-field">
+            <span>Student ID</span>
+            <input name="studentId" type="text" autocomplete="off" placeholder="Enter your registered student ID" />
+          </label>
+
+          <label id="faculty-name-field" class="auth-field hidden">
+            <span>Full name</span>
+            <input name="name" type="text" autocomplete="name" placeholder="Enter your full name" />
+          </label>
+
+          <label class="auth-field">
+            <span>Username</span>
+            <input name="username" type="text" minlength="3" maxlength="40" autocomplete="username" placeholder="Choose a username" required />
+          </label>
+
+          <label class="auth-field">
+            <span>Password</span>
+            <input name="password" type="password" minlength="8" autocomplete="new-password" placeholder="At least 8 characters" required />
+          </label>
+
+          <p id="registration-note" class="small-text">Choose your account type below. The selected role is saved to your account during registration.</p>
+          <button type="submit" class="btn btn-primary auth-submit">Create account</button>
+        </form>
+        <p id="auth-message" class="auth-message" role="status" aria-live="polite"></p>
+        <button id="auth-toggle" type="button" class="auth-link">Need an account? Register</button>
       </div>
     </div>
 
@@ -276,7 +299,12 @@
 
     <script>
       const loginForm = document.getElementById('login-form');
-      const roleSelect = document.getElementById('role-select');
+      const registrationForm = document.getElementById('registration-form');
+      const registrationRole = document.getElementById('registration-role');
+      const authToggle = document.getElementById('auth-toggle');
+      const studentIdField = document.getElementById('student-id-field');
+      const facultyNameField = document.getElementById('faculty-name-field');
+      const registrationNote = document.getElementById('registration-note');
       const loginScreen = document.getElementById('login-screen');
       const dashboardShell = document.getElementById('dashboard-shell');
       const authMessage = document.getElementById('auth-message');
@@ -388,60 +416,6 @@
         } catch (error) {
           console.error('Summary load error:', error);
         }
-      }
-
-      const authorizedUsers = {
-        programhead: { username: 'programhead', password: 'ProgramHead2026', role: 'Program Head' },
-        faculty: { username: 'faculty', password: 'Faculty2026', role: 'Faculty' }
-      };
-
-      function getPagePath(fileName) {
-        const currentPath = window.location.pathname;
-        const directory = currentPath.includes('/') ? currentPath.substring(0, currentPath.lastIndexOf('/') + 1) : './';
-        return `${directory}${fileName}`;
-      }
-
-      function normalizeIdentifier(value) {
-        return value.trim().toLowerCase();
-      }
-
-      async function hashValue(value) {
-        const encoder = new TextEncoder();
-        const data = encoder.encode(value);
-        const digest = await crypto.subtle.digest('SHA-256', data);
-        return Array.from(new Uint8Array(digest))
-          .map((byte) => byte.toString(16).padStart(2, '0'))
-          .join('');
-      }
-
-      async function hashPassword(password, salt) {
-        return hashValue(`${salt}:${password}`);
-      }
-
-      function loadRegisteredStudents() {
-        try {
-          const saved = localStorage.getItem('uccStudentRecords');
-          return saved ? JSON.parse(saved) : [];
-        } catch (error) {
-          return [];
-        }
-      }
-
-      async function authenticateStudent(username, password) {
-        const students = loadRegisteredStudents();
-        if (!students.length) {
-          return null;
-        }
-
-        const identifierHash = await hashValue(normalizeIdentifier(username));
-        const student = students.find((entry) => entry.usernameHash === identifierHash || entry.emailHash === identifierHash);
-
-        if (!student) {
-          return null;
-        }
-
-        const passwordHash = await hashPassword(password, student.salt);
-        return student.passwordHash === passwordHash ? student : null;
       }
 
       function setDashboardView(role) {
@@ -573,75 +547,98 @@
         showLogin(message || 'Please sign in to continue.');
       }
 
-      roleSelect.addEventListener('change', () => {
-        if (roleSelect.value === 'student') {
-          authMessage.textContent = 'Enter your student credentials below, or use the student sign-in page to register.';
-        } else {
-          authMessage.textContent = '';
-        }
+      function showAuthForm(isRegistering) {
+        loginForm.classList.toggle('hidden', isRegistering);
+        registrationForm.classList.toggle('hidden', !isRegistering);
+        authToggle.textContent = isRegistering ? 'Already have an account? Sign in' : 'Need an account? Register';
+        authMessage.textContent = '';
+      }
+
+      authToggle.addEventListener('click', () => {
+        showAuthForm(registrationForm.classList.contains('hidden'));
+      });
+
+      registrationRole.addEventListener('change', () => {
+        const isStudent = registrationRole.value === 'student';
+        studentIdField.classList.toggle('hidden', !isStudent);
+        facultyNameField.classList.toggle('hidden', isStudent);
+        studentIdField.querySelector('input').required = isStudent;
+        facultyNameField.querySelector('input').required = !isStudent;
+        registrationNote.textContent = isStudent
+          ? 'Use the student ID on your existing student record. Students receive read-only access to their own records.'
+          : 'Faculty accounts remain pending until a Program Head approves the request and assigns subjects.';
       });
 
       loginForm.addEventListener('submit', async (event) => {
         event.preventDefault();
 
-        const role = document.getElementById('role-select').value;
         const username = document.getElementById('username').value.trim();
         const password = document.getElementById('password').value;
-
-        if (role === 'student') {
-          try {
-            const response = await fetch('/api/login', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ role: 'student', username, password })
-            });
-
-            const result = await response.json();
-
-            if (!response.ok || !result.success) {
-              authMessage.textContent = result.message || 'Student login failed.';
-              return;
-            }
-
-            sessionStorage.setItem('uccAccessRole', 'Student');
-            sessionStorage.setItem('uccAccessToken', result.token);
-            sessionStorage.setItem('currentStudentName', result.student?.name || 'Student');
-            window.dispatchEvent(new Event('ucc:session-start'));
-            authMessage.textContent = `Welcome, ${result.student?.name || 'Student'}.`;
-            showDashboard();
-            return;
-          } catch (error) {
-            console.error('Student login error:', error);
-            authMessage.textContent = 'Unable to connect to the server.';
-            return;
-          }
-        }
 
         try {
           const response = await fetch('/api/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ role, username, password })
+            body: JSON.stringify({ username, password })
           });
 
           const result = await response.json();
 
           if (!response.ok || !result.success) {
             sessionStorage.removeItem('uccAccessRole');
-            authMessage.textContent = result.message || 'Invalid credentials. Only authorized Program Heads and Faculty may continue.';
+            authMessage.textContent = result.message || 'Invalid username or password.';
             return;
           }
 
-          sessionStorage.setItem('uccAccessRole', result.role || 'Program Head');
+          sessionStorage.setItem('uccAccessRole', result.role);
           sessionStorage.setItem('uccAccessToken', result.token);
-          sessionStorage.removeItem('currentStudentName');
+          if (result.student?.name) {
+            sessionStorage.setItem('currentStudentName', result.student.name);
+          } else {
+            sessionStorage.removeItem('currentStudentName');
+          }
           window.dispatchEvent(new Event('ucc:session-start'));
-          authMessage.textContent = `Welcome, ${result.role || 'User'}.`;
           showDashboard();
         } catch (error) {
-          console.error('Staff login error:', error);
+          console.error('Login error:', error);
           sessionStorage.removeItem('uccAccessRole');
-            sessionStorage.removeItem('uccAccessToken');
+          sessionStorage.removeItem('uccAccessToken');
+          authMessage.textContent = 'Unable to connect to the server.';
+        }
+      });
+
+      registrationForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const payload = Object.fromEntries(new FormData(registrationForm).entries());
+
+        try {
+          const response = await fetch('/api/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          const result = await response.json();
+
+          if (!response.ok || !result.success) {
+            authMessage.textContent = result.message || 'Unable to create your account.';
+            return;
+          }
+
+          if (result.role === 'Student') {
+            sessionStorage.setItem('uccAccessRole', result.role);
+            sessionStorage.setItem('uccAccessToken', result.token);
+            sessionStorage.setItem('currentStudentName', result.student.name);
+            window.dispatchEvent(new Event('ucc:session-start'));
+            showDashboard();
+            return;
+          }
+
+          registrationForm.reset();
+          registrationRole.dispatchEvent(new Event('change'));
+          showAuthForm(false);
+          authMessage.textContent = result.message;
+        } catch (error) {
+          console.error('Registration error:', error);
           authMessage.textContent = 'Unable to connect to the server.';
         }
       });

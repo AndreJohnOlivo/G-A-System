@@ -5,9 +5,12 @@ const { MongoClient, ObjectId } = require('mongodb');
 const jwt = require('jsonwebtoken');
 const bcryptjs = require('bcryptjs');
 
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || 'development-secret-change-me';
 const PROGRAM_HEAD_PASSWORD = process.env.PROGRAM_HEAD_PASSWORD || 'nimfa.silla1';
+const allowUnlinkedStudentRegistrationForTesting =
+  process.env.ALLOW_UNLINKED_STUDENT_REGISTRATION === 'true' &&
+  process.env.NODE_ENV !== 'production';
 
 // Serve static files from configurable folder
 const configuredRoot = process.env.ROOT_DIR && process.env.ROOT_DIR.trim();
@@ -133,6 +136,10 @@ function requireProgramHead(req, res) {
 
 function asText(value) {
   return String(value || '').trim();
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function normalizeSubjects(subjects) {
@@ -291,46 +298,153 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // Login endpoint
+  // Login endpoint: determine the role from the stored account, never from the request.
   if (url.pathname === '/api/login' && req.method === 'POST') {
     let rawBody = '';
     req.on('data', chunk => rawBody += chunk);
     req.on('end', async () => {
       try {
-        const { role, username, password } = JSON.parse(rawBody);
-
-        if (role === 'student') {
-          if (useMongo && mongoDb) {
-            const identifier = String(username || '').trim().toLowerCase();
-            const student = await mongoDb.collection('student_logins').findOne({ $or: [{ username: identifier }, { email: identifier }] });
-            if (student && student.password && await bcryptjs.compare(password, student.password)) {
-              const token = generateToken({ username: student.username, role: 'Student' });
-              return sendAuthenticatedJson(res, 200, { success: true, role: 'Student', token, student: { name: student.name } }, token);
-            }
-          }
-          return sendJson(res, 401, { success: false, message: 'Invalid student credentials' });
+        const { username, password } = JSON.parse(rawBody);
+        const identifier = String(username || '').trim().toLowerCase();
+        const submittedPassword = String(password || '');
+        if (!identifier || !submittedPassword) {
+          return sendJson(res, 400, { success: false, message: 'Username and password are required.' });
+        }
+        if (!useMongo || !mongoDb) {
+          return sendJson(res, 503, { success: false, message: 'Account services are temporarily unavailable.' });
         }
 
-        // Staff login
-        if (useMongo && mongoDb) {
-          const staffUsername = String(username || '').trim().toLowerCase();
-          const staffRole = role === 'programhead' ? 'Program Head' : role === 'faculty' ? 'Faculty' : role;
-          const user = await mongoDb.collection('users').findOne({ username: staffUsername, role: staffRole, active: { $ne: false } });
-          if (user && await bcryptjs.compare(password, user.password)) {
-            const token = generateToken({ username, role: user.role });
-            return sendAuthenticatedJson(res, 200, { success: true, role: user.role, token }, token);
+        const user = await mongoDb.collection('users').findOne({ username: identifier });
+        if (user) {
+          if (!user.password || !await bcryptjs.compare(submittedPassword, user.password)) {
+            return sendJson(res, 401, { success: false, message: 'Invalid username or password.' });
           }
+          if (user.active === false) {
+            const message = user.registrationStatus === 'pending'
+              ? 'Your Faculty registration is awaiting Program Head approval.'
+              : 'This account is inactive. Contact the Program Head for assistance.';
+            return sendJson(res, 403, { success: false, message });
+          }
+          const token = generateToken({ username: user.username, role: user.role });
+          return sendAuthenticatedJson(res, 200, { success: true, role: user.role, token }, token);
         }
-        return sendJson(res, 401, { success: false, message: 'Invalid staff credentials' });
+
+        const student = await mongoDb.collection('student_logins').findOne({
+          $or: [
+            { username: identifier },
+            { email: new RegExp(`^${escapeRegExp(identifier)}$`, 'i') }
+          ]
+        });
+        if (student && student.password && await bcryptjs.compare(submittedPassword, student.password)) {
+          const studentRole = student.role || 'Student';
+          const token = generateToken({ username: student.username, role: studentRole });
+          return sendAuthenticatedJson(res, 200, {
+            success: true,
+            role: studentRole,
+            token,
+            student: { name: student.name }
+          }, token);
+        }
+        return sendJson(res, 401, { success: false, message: 'Invalid username or password.' });
       } catch {
-        sendJson(res, 400, { success: false, message: 'Invalid request body' });
+        sendJson(res, 400, { success: false, message: 'Invalid request body.' });
       }
     });
     return;
   }
 
-  if (url.pathname === '/api/student-registration' && req.method === 'POST') {
-    return sendJson(res, 403, { success: false, message: 'Student accounts are provisioned by the registrar.' });
+  if (url.pathname === '/api/register' && req.method === 'POST') {
+    if (!useMongo || !mongoDb) {
+      return sendJson(res, 503, { success: false, message: 'Account services are temporarily unavailable.' });
+    }
+    try {
+      const payload = await readJsonBody(req);
+      const role = asText(payload.role).toLowerCase();
+      const username = asText(payload.username).toLowerCase();
+      const password = String(payload.password || '');
+      const name = asText(payload.name);
+      const studentId = asText(payload.studentId);
+
+      if (!['student', 'faculty'].includes(role)) {
+        return sendJson(res, 400, { success: false, message: 'Choose Student or Faculty to register.' });
+      }
+      if (!/^[a-z0-9._-]{3,40}$/.test(username)) {
+        return sendJson(res, 400, { success: false, message: 'Username must be 3–40 characters and use letters, numbers, dots, underscores, or hyphens.' });
+      }
+      if (password.length < 8) {
+        return sendJson(res, 400, { success: false, message: 'Password must have at least 8 characters.' });
+      }
+      if (role === 'faculty' && !name) {
+        return sendJson(res, 400, { success: false, message: 'Your full name is required.' });
+      }
+      if (role === 'student' && !studentId) {
+        return sendJson(res, 400, { success: false, message: 'Student ID is required.' });
+      }
+
+      const users = mongoDb.collection('users');
+      const studentLogins = mongoDb.collection('student_logins');
+      if (await users.findOne({ username })) {
+        return sendJson(res, 409, { success: false, message: 'That username is already in use.' });
+      }
+
+      if (role === 'student') {
+        const academicStudent = await mongoDb.collection('students').findOne({ studentId });
+        if (!academicStudent && !allowUnlinkedStudentRegistrationForTesting) {
+          return sendJson(res, 404, { success: false, message: 'Student record not found. Registration requires an existing student record.' });
+        }
+        const existingLogin = await studentLogins.findOne({
+          $or: [{ studentId }, { username }, { email: username }]
+        });
+        if (existingLogin) {
+          return sendJson(res, 409, { success: false, message: 'This student already has an account or the username is taken. Contact the registrar for help signing in.' });
+        }
+
+        const student = academicStudent || { studentId, name: `Student ${studentId}`, email: '' };
+        const studentLogin = {
+          role: 'Student',
+          studentId,
+          name: student.name,
+          email: asText(student.email).toLowerCase(),
+          username,
+          password: await bcryptjs.hash(password, 12),
+          mustChangePassword: false,
+          createdAt: new Date()
+        };
+        await studentLogins.insertOne(studentLogin);
+        const token = generateToken({ username, role: 'Student' });
+        return sendAuthenticatedJson(res, 201, {
+          success: true,
+          role: 'Student',
+          token,
+          student: { name: student.name }
+        }, token);
+      }
+
+      if (await studentLogins.findOne({ $or: [{ username }, { email: username }] })) {
+        return sendJson(res, 409, { success: false, message: 'That username is already in use.' });
+      }
+      await users.insertOne({
+        name,
+        username,
+        role: 'Faculty',
+        password: await bcryptjs.hash(password, 12),
+        assignedSubjects: [],
+        active: false,
+        registrationStatus: 'pending',
+        createdAt: new Date()
+      });
+      return sendJson(res, 202, {
+        success: true,
+        role: 'Faculty',
+        message: 'Faculty registration submitted. You can sign in after a Program Head approves your account and assigns your subjects.'
+      });
+    } catch (error) {
+      if (error.code === 11000) {
+        return sendJson(res, 409, { success: false, message: 'That username is already in use.' });
+      }
+      console.error('Registration error:', error);
+      return sendJson(res, 400, { success: false, message: 'Unable to process this registration request.' });
+    }
   }
 
   if (url.pathname === '/api/attendance') {
@@ -476,10 +590,22 @@ const server = http.createServer(async (req, res) => {
         updates.active = payload.active;
       }
       if (!Object.keys(updates).length) return sendJson(res, 400, { success: false, message: 'No faculty updates were provided.' });
+      const assignedSubjects = updates.assignedSubjects || faculty.assignedSubjects || [];
+      if (updates.active === true && !assignedSubjects.length) {
+        return sendJson(res, 400, { success: false, message: 'Assign at least one subject before approving or activating a Faculty account.' });
+      }
+      if (Object.hasOwn(updates, 'active')) {
+        updates.registrationStatus = updates.active ? 'approved' : 'inactive';
+        if (updates.active) updates.approvedAt = new Date();
+      }
 
       updates.updatedAt = new Date();
       await facultyCollection.updateOne({ _id: faculty._id }, { $set: updates });
-      await createAuditLog(user, 'faculty.updated', { username: faculty.username }, { assignedSubjects: faculty.assignedSubjects, active: faculty.active }, updates);
+      await createAuditLog(user, 'faculty.updated', { username: faculty.username }, {
+        assignedSubjects: faculty.assignedSubjects,
+        active: faculty.active,
+        registrationStatus: faculty.registrationStatus
+      }, updates);
       const updatedFaculty = await facultyCollection.findOne({ _id: faculty._id }, { projection: { password: 0 } });
       return sendJson(res, 200, { success: true, data: updatedFaculty });
     } catch {
@@ -516,6 +642,7 @@ const server = http.createServer(async (req, res) => {
           password: await bcryptjs.hash(password, 12),
           assignedSubjects: normalizeSubjects(payload.assignedSubjects),
           active: true,
+          registrationStatus: 'approved',
           mustChangePassword: true,
           createdAt: new Date()
         };
