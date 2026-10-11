@@ -8,6 +8,7 @@ const bcryptjs = require('bcryptjs');
 const port = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || 'development-secret-change-me';
 const PROGRAM_HEAD_PASSWORD = process.env.PROGRAM_HEAD_PASSWORD || 'nimfa.silla1';
+const mongoDbName = process.env.MONGO_DB_NAME || 'UCC_G&A';
 const allowUnlinkedStudentRegistrationForTesting =
   process.env.ALLOW_UNLINKED_STUDENT_REGISTRATION === 'true' &&
   process.env.NODE_ENV !== 'production';
@@ -64,7 +65,7 @@ async function connectToMongo(uri) {
   try {
     mongoClient = new MongoClient(uri);
     await mongoClient.connect();
-    mongoDb = mongoClient.db(process.env.MONGO_DB_NAME || 'UCC_G&A_DB');
+    mongoDb = mongoClient.db(mongoDbName);
     await Promise.all([
       mongoDb.collection('users').createIndex({ username: 1 }, { unique: true }),
       mongoDb.collection('students').createIndex({ studentId: 1 }, { unique: true, sparse: true }),
@@ -76,9 +77,14 @@ async function connectToMongo(uri) {
     await migrateStudentCollections();
     useMongo = true;
     console.log('Connected to MongoDB and prepared user accounts and student records');
+    return true;
   } catch (err) {
     console.warn('MongoDB connection failed, fallback to memory:', err.message);
+    if (mongoClient) await mongoClient.close();
+    mongoClient = null;
+    mongoDb = null;
     useMongo = false;
+    return false;
   }
 }
 
@@ -823,8 +829,20 @@ async function closeMongo() {
 // Start server
 if (require.main === module) {
   const mongoUri = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/ucc_backend_db';
-  connectToMongo(mongoUri).finally(() => {
-    server.listen(port, () => console.log(`Server running at http://localhost:${port}`));
+  (async () => {
+    if (process.env.NODE_ENV === 'production' && !process.env.MONGO_URI) {
+      throw new Error('MONGO_URI must be configured in production.');
+    }
+
+    const connected = await connectToMongo(mongoUri);
+    if (!connected && process.env.NODE_ENV === 'production') {
+      throw new Error('MongoDB connection is required in production; server was not started.');
+    }
+
+    server.listen(port, () => console.log(`Server running on port ${port}`));
+  })().catch((err) => {
+    console.error('Server startup failed:', err.message);
+    process.exitCode = 1;
   });
 }
 
