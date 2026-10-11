@@ -32,10 +32,12 @@ Set environment variables before starting the server. In PowerShell:
 
 ```powershell
 $env:MONGO_URI = "mongodb://127.0.0.1:27017/ucc_backend_db"
-$env:MONGO_DB_NAME = "UCC_G&A_DB"
+$env:MONGO_DB_NAME = "UCC_G&A"
 $env:JWT_SECRET = "replace-with-a-long-random-secret"
 $env:PROGRAM_HEAD_PASSWORD = "replace-with-a-secure-password"
 ```
+
+For MongoDB Atlas, use the Atlas connection string as `MONGO_URI` and set `MONGO_DB_NAME` to `UCC_G&A`. The repository's `.env.example` contains a connection-string template with a password placeholder; replace it only in your deployment environment settings, not in a committed file. Use an Atlas database user's credentials, and URL-encode reserved characters in the password.
 
 Start the application:
 

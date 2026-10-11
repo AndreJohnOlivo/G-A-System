@@ -6,7 +6,7 @@ const bcryptjs = require('bcryptjs');
 const csvPath = process.argv[2];
 const temporaryPassword = process.env.STUDENT_TEMPORARY_PASSWORD || 'ChangeMe2026!';
 const mongoUri = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/ucc_backend_db';
-const databaseName = process.env.MONGO_DB_NAME || 'UCC_G&A_DB';
+const databaseName = process.env.MONGO_DB_NAME || 'UCC_G&A';
 const requiredColumns = ['studentId', 'name', 'email', 'course', 'year', 'status'];
 
 function parseCsv(text) {
